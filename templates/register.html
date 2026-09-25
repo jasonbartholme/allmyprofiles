@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block title %}Create your account — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-md-6 col-lg-5">
+      <div class="card p-4 p-md-5">
+        <h2 class="fw-bold mb-1 text-center">Create your account</h2>
+        <p class="text-muted text-center mb-4">Your free profile page is 60 seconds away.</p>
+
+        <form method="POST" action="{{ url_for('register') }}" novalidate>
+          {% set prefill = request.args.get('username', '')|trim|lower|replace(' ', '') %}
+          <div class="mb-3">
+            <label for="username" class="form-label">Username</label>
+            <input type="text" class="form-control" id="username" name="username"
+                   value="{{ prefill }}"
+                   placeholder="yourname" required minlength="3" maxlength="31"
+                   pattern="[a-z0-9][a-z0-9_-]{2,30}"
+                   title="3-31 characters: letters, numbers, hyphens or underscores (start with a letter or number).">
+            <div class="form-text">This becomes your public URL: /u/&lt;username&gt;</div>
+          </div>
+          <div class="mb-3">
+            <label for="display_name" class="form-label">Display name</label>
+            <input type="text" class="form-control" id="display_name" name="display_name"
+                   placeholder="Jane Doe" maxlength="120">
+          </div>
+          <div class="mb-3">
+            <label for="email" class="form-label">Email address</label>
+            <input type="email" class="form-control" id="email" name="email"
+                   placeholder="you@example.com" required>
+          </div>
+          <div class="mb-4">
+            <label for="password" class="form-label">Password</label>
+            <input type="password" class="form-control" id="password" name="password"
+                   required minlength="8" placeholder="At least 8 characters">
+          </div>
+          <button type="submit" class="btn btn-primary w-100 rounded-pill py-2">Sign up free</button>
+        </form>
+
+        <hr class="my-4">
+        <p class="text-center mb-0">Already have an account?
+          <a href="{{ url_for('login') }}" class="fw-semibold text-decoration-none">Log in</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

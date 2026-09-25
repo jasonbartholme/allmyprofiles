@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block title %}Inbox — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 860px">
+  <div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
+    <h2 class="fw-bold mb-0"><i class="bi bi-envelope-open me-2 text-primary"></i>Inbox</h2>
+    {% if unread_total %}
+      <form method="POST" action="{{ url_for('inbox_read_all') }}">
+        <button class="btn btn-sm btn-outline-primary">
+          <i class="bi bi-check2-all me-1"></i>Mark all {{ unread_total }} unread as read
+        </button>
+      </form>
+    {% endif %}
+  </div>
+  {% if unread_total %}
+    <p class="text-muted small mb-3">{{ unread_total }} unread message{{ 's' if unread_total != 1 }}</p>
+  {% else %}
+    <p class="text-muted small mb-3">You're all caught up.</p>
+  {% endif %}
+
+  <ul class="nav nav-pills mb-3 small">
+    <li class="nav-item"><a class="nav-link {{ 'active' if view=='inbox' }}" href="{{ url_for('inbox') }}">All</a></li>
+    <li class="nav-item"><a class="nav-link {{ 'active' if view=='unread' }}" href="{{ url_for('inbox', view='unread') }}">Unread</a></li>
+    <li class="nav-item"><a class="nav-link {{ 'active' if view=='archived' }}" href="{{ url_for('inbox', view='archived') }}">Archived</a></li>
+  </ul>
+
+  <div class="list-group shadow-sm">
+    {% for r in reads %}
+      {% set m = r.message %}
+      <a href="{{ url_for('inbox_message', message_id=m.id) }}"
+         class="list-group-item list-group-item-action {{ 'msg-unread fw-semibold' if not r.is_read else 'msg-read' }} sev-{{ m.severity }}">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+          <div class="flex-grow-1">
+            {% if not r.is_read %}<i class="bi bi-circle-fill text-primary me-1" style="font-size:.5rem; vertical-align:middle"></i>{% endif %}
+            {{ m.subject }}
+          </div>
+          <span class="small text-muted text-nowrap">{{ r.delivered_at.strftime('%b %d, %Y') }}</span>
+        </div>
+        <div class="small mt-1 d-flex gap-2 align-items-center flex-wrap">
+          <span class="badge text-bg-light border">{{ m.category_label }}</span>
+          <span class="badge text-bg-{{ m.severity_info.badge }}">{{ m.severity_info.label }}</span>
+          {% if m.source == 'link_check' %}<span class="text-muted"><i class="bi bi-robot me-1"></i>Automatic link check</span>{% endif %}
+          {% if r.is_archived %}<span class="text-muted"><i class="bi bi-archive me-1"></i>Archived</span>{% endif %}
+        </div>
+        <div class="small text-muted text-truncate" style="max-width:100%">{{ m.body | truncate(110) }}</div>
+      </a>
+    {% else %}
+      <div class="list-group-item text-center text-muted py-5">
+        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+        {% if view == 'archived' %}No archived messages.{% elif view == 'unread' %}No unread messages.{% else %}Your inbox is empty. Messages from the team will appear here.{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

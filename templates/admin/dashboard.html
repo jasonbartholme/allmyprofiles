@@ -1,0 +1,129 @@
+{% extends 'base.html' %}
+{% block title %}Admin — AllMyProfiles{% endblock %}
+{% import 'admin/_nav.html' as dash %}
+
+
+
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <h2 class="fw-bold mb-1"><i class="bi bi-shield-lock text-danger me-2"></i>Admin</h2>
+    </div>
+    <a class="btn btn-primary align-self-center" href="{{ url_for('admin_compose') }}">
+      <i class="bi bi-envelope-paper me-1"></i>Message users</a>
+  </div>
+  <p class="text-muted small mb-3">{{ site_tagline }}</p>
+    {{ dash.nav('overview') }}
+
+  <!-- ===== Instant metrics ===== -->
+  <div class="row g-3 mb-4">
+    {% for label, value, icon, color in [
+        ('Total users', total_users, 'people-fill', 'primary'),
+        ('Signups today', signups_today, 'person-plus-fill', 'success'),
+        ('Signups (7 days)', signups_week, 'calendar-week', 'info'),
+        ('Total links', total_links, 'link-45deg', 'secondary'),
+        ('Total clicks', total_clicks, 'cursor-fill', 'warning') ] %}
+    <div class="col-6 col-lg">
+      <div class="card p-3 text-center h-100">
+        <i class="bi bi-{{ icon }} text-{{ color }} fs-3"></i>
+        <div class="fs-4 fw-bold">{{ '{:,}'.format(value or 0) }}</div>
+        <div class="small text-muted">{{ label }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="row g-4">
+    <!-- ===== Tier breakdown ===== -->
+    <div class="col-md-4">
+      <div class="card p-4 h-100">
+        <h5 class="fw-bold mb-3"><i class="bi bi-diagram-3 me-2"></i>Tier breakdown</h5>
+        {% set total = tier_counts.values() | sum %}
+        {% for tier in TIERS %}
+          {% set count = tier_counts.get(tier, 0) %}
+          {% set pct = (100 * count / total) if total else 0 %}
+          <div class="d-flex justify-content-between small">
+            <span>{{ tier }}</span><span class="text-muted">{{ count }} ({{ '%.0f'|format(pct) }}%)</span>
+          </div>
+          <div class="progress mb-2" style="height:6px">
+            <div class="progress-bar" style="width: {{ pct }}%"></div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- ===== Top links ===== -->
+    <div class="col-md-8">
+      <div class="card p-4 h-100">
+        <h5 class="fw-bold mb-3"><i class="bi bi-trophy me-2"></i>Top links by clicks</h5>
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr class="text-muted small"><th>#</th><th>User</th><th>Link</th><th class="text-end">Clicks</th></tr></thead>
+          <tbody>
+          {% for link, username in top_links %}
+            <tr>
+              <td class="text-muted">{{ loop.index }}</td>
+              <td><a href="{{ url_for('public_profile', username=username) }}">@{{ username }}</a></td>
+              <td class="text-truncate" style="max-width:280px">{{ link.title }}</td>
+              <td class="text-end fw-semibold">{{ link.click_count or 0 }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="text-muted">No links yet.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mt-1">
+    <!-- ===== Recent activity feed ===== -->
+    <div class="col-lg-7">
+      <div class="card p-4 h-100">
+        <h5 class="fw-bold mb-3"><i class="bi bi-activity me-2"></i>Recent activity</h5>
+        <ul class="list-unstyled mb-0">
+        {% for a in activities %}
+          <li class="d-flex gap-2 border-bottom py-2 small">
+            <span class="badge text-bg-{{ {'signup':'success','tier_change':'primary','impersonate_start':'warning','impersonate_end':'secondary','settings_update':'dark','admin_flag_change':'danger'}.get(a.kind,'light text-dark') }} align-self-start">
+              {{ a.kind.replace('_',' ') }}
+            </span>
+            <div>
+              {% if a.user %}<strong>{{ a.user.username }}</strong>{% endif %}
+              {% if a.detail %} — {{ a.detail }}{% endif %}
+              {% if a.actor and a.kind.startswith('impersonate') %}
+                <span class="text-muted">(by admin {{ a.actor.username }})</span>
+              {% endif %}
+              <div class="text-muted">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+            </div>
+          </li>
+        {% else %}
+          <li class="text-muted small">Nothing yet.</li>
+        {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+    <!-- ===== Newest accounts ===== -->
+    <div class="col-lg-5">
+      <div class="card p-4 h-100">
+        <h5 class="fw-bold mb-3"><i class="bi bi-person-plus me-2"></i>Newest accounts</h5>
+        <ul class="list-unstyled mb-0">
+        {% for u in recent_users %}
+          <li class="d-flex align-items-center gap-2 border-bottom py-2">
+            <img src="{{ u.avatar_src }}" class="avatar-sm rounded-circle border" alt="">
+            <div class="flex-grow-1 min-w-0">
+              <div class="fw-semibold text-truncate mb-0">{{ u.display_name }}
+                {% if u.is_admin %}<span class="badge text-bg-danger">admin</span>{% endif %}</div>
+              <div class="small text-muted text-truncate">@{{ u.username }} · {{ u.tier }}</div>
+            </div>
+            <span class="small text-muted">{{ u.created_at.strftime('%m/%d') }}</span>
+          </li>
+        {% else %}
+          <li class="text-muted small">No users yet.</li>
+        {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

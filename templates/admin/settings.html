@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}Admin · Settings — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 720px">
+  <h2 class="fw-bold mb-3"><i class="bi bi-shield-lock text-danger me-2"></i>Admin · Site settings</h2>
+  {{ dash.nav('settings') }}
+
+  <div class="card p-4">
+    <form method="POST" action="{{ url_for('admin_settings') }}">
+      <div class="row g-3">
+        <div class="col-sm-6">
+          <label class="form-label" for="free_tier_max_links">Free tier — max active links</label>
+          <input type="number" min="0" class="form-control" id="free_tier_max_links"
+                 name="free_tier_max_links" value="{{ settings.free_tier_max_links }}" required>
+          <div class="form-text">Currently kept at <strong>3</strong>; change any time.</div>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="expanded_tier_max_links">Expanded tier — max active links</label>
+          <input type="number" min="0" class="form-control" id="expanded_tier_max_links"
+                 name="expanded_tier_max_links" value="{{ settings.expanded_tier_max_links }}" required>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="max_upload_size_kb">Max avatar upload (KB)</label>
+          <input type="number" min="16" class="form-control" id="max_upload_size_kb"
+                 name="max_upload_size_kb" value="{{ settings.max_upload_size_kb }}" required>
+          <div class="form-text">Hard request ceiling is 5 MB regardless.</div>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="link_check_notify_days">Broken-link re-notification cooldown (days)</label>
+          <input type="number" min="0" class="form-control" id="link_check_notify_days"
+                 name="link_check_notify_days" value="{{ settings.link_check_notify_days }}" required>
+          <div class="form-text">Minimum days between inbox reports about the same still-broken links (spam guard used by check_links.py).</div>
+        </div>
+        <div class="col-12">
+          <label class="form-label" for="site_tagline">Site tagline</label>
+          <input type="text" maxlength="200" class="form-control" id="site_tagline"
+                 name="site_tagline" value="{{ settings.site_tagline }}">
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary rounded-pill px-4 mt-4">Save settings</button>
+    </form>
+  </div>
+
+  <p class="text-muted small mt-3">
+    Tier limits apply to <em>active</em> profile links. “Full” and “Custom” tiers are unlimited.
+    Changes take effect immediately for all users.
+  </p>
+</div>
+{% endblock %}

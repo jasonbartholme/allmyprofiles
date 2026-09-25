@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Log in — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-md-6 col-lg-5">
+      <div class="card p-4 p-md-5">
+        <h2 class="fw-bold mb-4 text-center">Welcome back</h2>
+
+        <form method="POST" action="{{ url_for('login', next=request.args.get('next')) }}" novalidate>
+          <div class="mb-3">
+            <label for="email" class="form-label">Email address</label>
+            <input type="email" class="form-control" id="email" name="email"
+                   placeholder="you@example.com" required autofocus>
+          </div>
+          <div class="mb-3">
+            <label for="password" class="form-label">Password</label>
+            <input type="password" class="form-control" id="password" name="password" required>
+          </div>
+          <div class="form-check mb-4">
+            <input class="form-check-input" type="checkbox" id="remember" name="remember" value="1">
+            <label class="form-check-label" for="remember">Remember me</label>
+          </div>
+          <button type="submit" class="btn btn-primary w-100 rounded-pill py-2">Log in</button>
+        </form>
+
+        <hr class="my-4">
+        <p class="text-center mb-0">New here?
+          <a href="{{ url_for('register') }}" class="fw-semibold text-decoration-none">Create a free account</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Help Center — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-5" style="max-width: 820px;">
+  <h1 class="fw-bold mb-4">Help Center</h1>
+
+  <div class="card p-4 mb-4">
+    <h5 class="fw-bold"><i class="bi bi-lightning-charge text-warning me-2"></i>Getting started</h5>
+    <ol class="mb-0">
+      <li><strong>Create your account</strong> — pick the username that becomes your public link (<code>/u/yourname</code>).</li>
+      <li><strong>Add your links</strong> — from the Dashboard, give each link a title and URL. Free plans include {{ free_max|default(3) }} active links.</li>
+      <li><strong>Customize</strong> — upload an avatar, set a display name, headline, and bio. Paid plans unlock themes and styling.</li>
+      <li><strong>Reorder &amp; hide</strong> — drag links into priority order, or toggle them off without deleting them.</li>
+      <li><strong>Share it everywhere</strong> — put your one link in every social bio.</li>
+    </ol>
+  </div>
+
+  <div class="card p-4 mb-4">
+    <h5 class="fw-bold"><i class="bi bi-graph-up text-success me-2"></i>Analytics</h5>
+    <p class="mb-1">Every click on your public page is counted on the link card in your Dashboard. Higher tiers add standard and advanced analytics, plus Google Analytics / Tag Manager and Meta pixel integrations.</p>
+  </div>
+
+  <div class="card p-4 mb-4">
+    <h5 class="fw-bold"><i class="bi bi-search text-primary me-2"></i>Search &amp; AI visibility</h5>
+    <p class="mb-0">Public profiles publish JSON-LD (schema.org Person) markup and Open Graph tags automatically, so Google snippets are richer and AI assistants (ChatGPT, Perplexity) can attribute your links to you correctly.</p>
+  </div>
+
+  <div class="card p-4">
+    <h5 class="fw-bold"><i class="bi bi-life-preserver text-danger me-2"></i>Still stuck?</h5>
+    <p class="mb-3">Paid customers get priority support. Everyone else — we still reply.</p>
+    <a href="{{ url_for('contact') }}" class="btn btn-primary rounded-pill px-4">Contact support</a>
+  </div>
+</div>
+{% endblock %}
