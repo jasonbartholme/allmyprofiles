@@ -6,10 +6,9 @@
 {# Open Graph / SEO tags for the public profile #}
 <meta property="og:title" content="{{ user.display_name }} (@{{ user.username }})">
 <meta property="og:description" content="{{ user.headline or user.bio or 'All of ' ~ user.display_name ~ "'s profiles in one place." }}">
-<meta property="og:image" content="{{ user.avatar_src }}">
+<meta property="og:image" content="{{ user.avatar_src if user.avatar_src.startswith('http') else site_url ~ user.avatar_src }}">
 <meta property="og:type" content="profile">
 <meta name="twitter:card" content="summary">
-<link rel="canonical" href="{{ request.url_root.rstrip('/') }}/u/{{ user.username }}">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
