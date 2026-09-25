@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}Contact Us — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-md-7 col-lg-6">
+      <h1 class="fw-bold mb-2">Contact us</h1>
+      <p class="text-muted mb-4">Questions, bug reports, partnership ideas, or upgrade requests — this reaches the site admin directly.</p>
+
+      <div class="card p-4 p-md-5">
+        <form method="POST" action="{{ url_for('contact') }}">
+          <div class="mb-3">
+            <label class="form-label" for="c_name">Your name</label>
+            <input class="form-control" id="c_name" name="name" required maxlength="120">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="c_email">Email</label>
+            <input class="form-control" id="c_email" name="email" type="email" required placeholder="you@example.com">
+          </div>
+          <div class="mb-4">
+            <label class="form-label" for="c_message">Message</label>
+            <textarea class="form-control" id="c_message" name="message" rows="5" required minlength="10"
+                      placeholder="How can we help?"></textarea>
+          </div>
+          <button class="btn btn-primary rounded-pill px-4" type="submit">
+            <i class="bi bi-send me-1"></i>Send message
+          </button>
+        </form>
+      </div>
+
+      <p class="text-center text-muted small mt-4">
+        Prefer email? <a href="mailto:support@allmyprofiles.io">support@allmyprofiles.io</a>
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

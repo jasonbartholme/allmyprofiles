@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}Admin · New message — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 760px">
+  <h2 class="fw-bold mb-3"><i class="bi bi-shield-lock text-danger me-2"></i>Admin · New message</h2>
+  {{ dash.nav('messages') }}
+
+  <div class="card p-4">
+    <form method="POST">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Audience</label>
+        <select name="audience" class="form-select" required>
+          {% for value, label in audiences %}
+            <option value="{{ value }}"
+              {{ 'selected' if form.get('audience') == value or (not form.get('audience') and value == 'one') }}>
+              {{ label }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-text">“Paid users only” targets Expanded, Full and Custom tiers.</div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-7">
+          <label class="form-label fw-semibold">Category</label>
+          <select name="category" class="form-select" id="category" required>
+            {% for key, meta in categories.items() %}
+              <option value="{{ key }}" data-default-sev="{{ meta.default_severity }}"
+                {{ 'selected' if form.get('category') == key }}>{{ meta.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label fw-semibold">Severity</label>
+          <select name="severity" class="form-select" id="severity">
+            <option value="">(category default)</option>
+            {% for key, meta in severities.items() %}
+              <option value="{{ key }}" {{ 'selected' if form.get('severity') == key }}>
+                {{ meta.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Subject</label>
+        <input type="text" name="subject" class="form-control" maxlength="200" required
+               value="{{ form.get('subject', '') }}" placeholder="e.g. New feature: dark mode for paid plans">
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Message</label>
+        <textarea name="body" class="form-control" rows="8" required
+                  placeholder="Write your message here. Plain text — line breaks are preserved.">{{ form.get('body', '') }}</textarea>
+      </div>
+
+      <details class="mb-3">
+        <summary class="fw-semibold small">Optional call-to-action button</summary>
+        <div class="row g-2 mt-1">
+          <div class="col-md-7">
+            <input type="url" name="action_url" class="form-control form-control-sm"
+                   placeholder="https://yoursite.com/changelog" value="{{ form.get('action_url', '') }}">
+          </div>
+          <div class="col-md-5">
+            <input type="text" name="action_label" class="form-control form-control-sm"
+                   placeholder="Button label (e.g. Read the changelog)" maxlength="60"
+                   value="{{ form.get('action_label', '') }}">
+          </div>
+        </div>
+      </details>
+
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-send me-1"></i>Send now</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('admin_messages') }}">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  // When the category changes, hint its default severity in the option text.
+  const cat = document.getElementById('category');
+  const sev = document.getElementById('severity');
+  cat.addEventListener('change', () => {
+    const opt = cat.selectedOptions[0];
+    if (opt && sev.value === '') {
+      const def = opt.dataset.defaultSev;
+      sev.querySelector(`option[value="${def}"]`)?.setAttribute('style', 'font-weight:700');
+    }
+  });
+</script>
+{% endblock %}

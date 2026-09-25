@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Privacy Policy — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-5" style="max-width: 820px;">
+  <h1 class="fw-bold mb-1">Privacy Policy</h1>
+  <p class="text-muted small">Last updated: {{ current_year }}</p>
+
+  <div class="card p-4 p-md-5">
+    <h5 class="fw-bold">What we collect</h5>
+    <ul>
+      <li><strong>Account data:</strong> username, email, display name, hashed password, and your tier.</li>
+      <li><strong>Profile content:</strong> headline, bio, links you publish, and avatar images you upload (stored on our own servers, never sold).</li>
+      <li><strong>Usage data:</strong> aggregate click counts on your links. We do not sell visitor data or run third-party ad networks on free pages.</li>
+    </ul>
+
+    <h5 class="fw-bold mt-4">Tracking pixels &amp; analytics</h5>
+    <p>Google Analytics, Google Tag Manager, and Meta pixels load on a public profile
+      <em>only</em> if the profile owner adds their own IDs on a paid plan. Visitors can
+      opt out via their browser settings and standard blocking tools.</p>
+
+    <h5 class="fw-bold mt-4">How we use data</h5>
+    <p>To operate the service, secure it against abuse, notify you about broken links or
+      account events through your inbox, and provide support. Admins may impersonate an
+      account temporarily for support purposes; every such session is logged.</p>
+
+    <h5 class="fw-bold mt-4">Sharing</h5>
+    <p>We share data only with infrastructure providers needed to run the site (hosting,
+      database) and never with data brokers. Law enforcement requests are honored where
+      legally required.</p>
+
+    <h5 class="fw-bold mt-4">Your rights</h5>
+    <p>You can view and edit most of your data in the Dashboard at any time. To export or
+      permanently delete your account and all uploaded files, contact us via the
+      <a href="{{ url_for('contact') }}">contact form</a>; we respond within 30 days.</p>
+
+    <h5 class="fw-bold mt-4">Security</h5>
+    <p class="mb-0">Passwords are salted and hashed, uploads are re-encoded to strip
+      metadata (including EXIF location), and production traffic should be served over
+      HTTPS.</p>
+  </div>
+</div>
+{% endblock %}

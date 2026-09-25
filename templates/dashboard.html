@@ -1,0 +1,180 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
+    <div>
+      <h2 class="fw-bold mb-0">Your dashboard</h2>
+      <a href="{{ url_for('public_profile', username=current_user.username) }}"
+         class="text-decoration-none small">
+        <i class="bi bi-box-arrow-up-right me-1"></i>{{ request.url_root }}u/{{ current_user.username }}
+      </a>
+    </div>
+    <span class="badge rounded-pill text-bg-primary fs-6 mt-2 mt-md-0">
+      {{ current_user.tier }} plan
+      {% if current_user.max_active_links %}
+        · {{ links|selectattr('is_active')|list|length }}/{{ current_user.max_active_links }} active links
+      {% endif %}
+    </span>
+  </div>
+
+  <div class="row g-4">
+    <!-- ===== Links manager ===== -->
+    <div class="col-lg-7">
+      <div class="card p-4 mb-4">
+        <h5 class="fw-bold mb-3"><i class="bi bi-link-45deg me-2"></i>Your links</h5>
+
+        {% if links %}
+        <form method="POST" action="{{ url_for('dashboard') }}" id="order-form" class="d-none">
+          <input type="hidden" name="form_action" value="link-order">
+          <input type="hidden" name="order" id="order-input">
+        </form>
+        <ul class="list-unstyled mb-0" id="link-list">
+          {% for link in links %}
+          <li class="link-card card bg-light border p-3 mb-2 d-flex flex-wrap align-items-center gap-2"
+              data-link-id="{{ link.id }}">
+            <i class="bi bi-grip-vertical text-muted drag-handle" role="button" title="Drag to reorder"></i>
+            <div class="flex-grow-1 min-w-0">
+              <div class="fw-semibold text-truncate">
+                <i class="bi bi-{{ link.icon_code or 'link-45deg' }} me-1"></i>{{ link.title }}
+              </div>
+              <div class="small text-muted text-truncate">{{ link.url }}</div>
+              <div class="small"><i class="bi bi-cursor-fill me-1 text-success"></i>{{ link.click_count or 0 }} clicks</div>
+            </div>
+            <div class="d-flex gap-2 align-items-center">
+              {% if not link.is_active %}<span class="badge text-bg-secondary">Hidden</span>{% endif %}
+              <form method="POST" action="{{ url_for('toggle_link', link_id=link.id) }}">
+                <button type="submit" class="btn btn-sm btn-outline-secondary"
+                        title="{{ 'Hide' if link.is_active else 'Show' }}">
+                  <i class="bi bi-{{ 'eye' if link.is_active else 'eye-slash' }}"></i>
+                </button>
+              </form>
+              <form method="POST" action="{{ url_for('delete_link', link_id=link.id) }}"
+                    onsubmit="return confirm('Remove this link?');">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </form>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted mb-0">No links yet — add your first one below!</p>
+        {% endif %}
+      </div>
+
+      <div class="card p-4">
+        <h5 class="fw-bold mb-3"><i class="bi bi-plus-circle me-2"></i>Add a new link</h5>
+        <form method="POST" action="{{ url_for('add_link') }}">
+          <div class="row g-3">
+            <div class="col-sm-5">
+              <input type="text" class="form-control" name="title" placeholder="Title (e.g. My YouTube)" required maxlength="120">
+            </div>
+            <div class="col-sm-7">
+              <input type="url" class="form-control" name="url" placeholder="https://…" required>
+            </div>
+            <div class="col-sm-8">
+              <select class="form-select" name="icon_code">
+                {% set icons = ['link-45deg','globe','instagram','twitter-x','youtube','github','linkedin','facebook','tiktok','twitch','whatsapp','telegram','shop','camera-fill','mic-fill','briefcase','envelope','music-note-beamed','play-btn'] %}
+                {% for icon in icons %}
+                <option value="{{ icon }}"><i></i> {{ icon }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-sm-4 d-grid">
+              <button type="submit" class="btn btn-primary rounded-pill">Add link</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ===== Profile editor ===== -->
+    <div class="col-lg-5">
+      <div class="card p-4">
+        <h5 class="fw-bold mb-3"><i class="bi bi-person-vcard me-2"></i>Edit your profile</h5>
+        <form method="POST" action="{{ url_for('dashboard') }}">
+          <input type="hidden" name="form_action" value="profile">
+          <div class="mb-3">
+            <label class="form-label" for="display_name">Display name</label>
+            <input type="text" class="form-control" id="display_name" name="display_name"
+                   value="{{ current_user.display_name }}" required maxlength="120">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="headline">Headline</label>
+            <input type="text" class="form-control" id="headline" name="headline"
+                   value="{{ current_user.headline or '' }}" maxlength="250"
+                   placeholder="e.g. Full-stack developer & coffee blogger">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="bio">Short bio</label>
+            <textarea class="form-control" id="bio" name="bio" rows="2"
+                      maxlength="500" placeholder="A sentence or two about you…">{{ current_user.bio or '' }}</textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="about_section">About section</label>
+            <textarea class="form-control" id="about_section" name="about_section" rows="4">{{ current_user.about_section or '' }}</textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Avatar</label>
+            <div class="d-flex align-items-center gap-3 mb-2">
+              <img src="{{ current_user.avatar_src }}" alt="" class="avatar-lg rounded-circle border">
+              <div class="flex-grow-1">
+                <form method="POST" action="{{ url_for('dashboard') }}" enctype="multipart/form-data" class="d-flex gap-2 align-items-center flex-wrap">
+                  <input type="hidden" name="form_action" value="avatar-upload">
+                  <input type="file" class="form-control form-control-sm" name="avatar_file"
+                         accept=".png,.jpg,.jpeg,.gif,.webp" style="max-width: 220px;">
+                  <button type="submit" class="btn btn-sm btn-primary rounded-pill px-3">Upload</button>
+                </form>
+                {% if current_user.avatar_path %}
+                <form method="POST" action="{{ url_for('dashboard') }}" class="d-inline mt-1">
+                  <input type="hidden" name="form_action" value="avatar-remove">
+                  <button type="submit" class="btn btn-sm btn-link text-danger p-0 small">Remove uploaded avatar</button>
+                </form>
+                {% endif %}
+                <div class="form-text">PNG, JPG, GIF or WEBP · max {{ max_upload_kb }} KB · stored locally on this server.</div>
+              </div>
+            </div>
+          </div>
+          <div class="mb-4">
+            <label class="form-label" for="avatar_url">…or avatar URL (external)</label>
+            <div class="input-group">
+              <input type="url" class="form-control" id="avatar_url" name="avatar_url"
+                     value="{{ current_user.avatar_url or '' }}" placeholder="https://…/avatar.png">
+            </div>
+            <div class="form-text">An uploaded avatar takes precedence over a URL.</div>
+          </div>
+          <button type="submit" class="btn btn-primary rounded-pill px-4">Save profile</button>
+        </form>
+      </div>
+
+      <div class="card p-4 mt-4 text-center">
+        <h5 class="fw-bold"><i class="bi bi-graph-up-arrow me-2"></i>Total clicks</h5>
+        <div class="display-5 fw-bold text-primary">{{ total_clicks }}</div>
+        <p class="text-muted small mb-0">Across all of your links</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+  // Drag-and-drop reordering; persists order on drop.
+  const list = document.getElementById('link-list');
+  if (list && window.Sortable) {
+    Sortable.create(list, {
+      handle: '.drag-handle',
+      animation: 150,
+      onEnd: () => {
+        const ids = [...list.querySelectorAll('li')].map(li => li.dataset.linkId);
+        document.getElementById('order-input').value = ids.join(',');
+        document.getElementById('order-form').submit();
+      }
+    });
+  }
+</script>
+{% endblock %}

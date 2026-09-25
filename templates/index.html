@@ -1,0 +1,555 @@
+{% extends 'base.html' %}
+{% block title %}AllMyProfiles — One Link for All Your Profiles, Content & Business{% endblock %}
+{% block description %}Claim your unique username, unify your digital footprint, and optimize your personal brand for search and AI discovery. Free link-in-bio page with click analytics.{% endblock %}
+
+{% block head %}
+<style>
+  .hero { position: relative; overflow: hidden; }
+  .claim-box { max-width: 560px; }
+  .avail-ok { color: #7CFFB2; }
+  .avail-bad { color: #ffb3b3; }
+  .phone-frame {
+    width: 300px; height: 610px; border-radius: 42px; background: #10122b;
+    padding: 14px; box-shadow: 0 30px 80px rgba(10, 12, 40, .45);
+    transform: rotate(3deg); transition: transform .3s ease;
+  }
+  .phone-frame:hover { transform: rotate(0deg) translateY(-4px); }
+  .phone-screen {
+    width: 100%; height: 100%; border-radius: 30px; overflow: hidden auto;
+    background: linear-gradient(180deg, #1e2148 0%, #2a2f66 100%);
+    color: #fff; padding: 22px 16px; scrollbar-width: none;
+  }
+  .phone-screen::-webkit-scrollbar { display: none; }
+  .phone-notch {
+    width: 110px; height: 22px; background: #10122b; border-radius: 0 0 14px 14px;
+    margin: -22px auto 14px; position: relative; z-index: 2;
+  }
+  .phone-link {
+    display: block; background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.15);
+    color: #fff; text-decoration: none; border-radius: 12px; padding: 11px 12px;
+    margin-bottom: 10px; font-size: .85rem; text-align: center;
+    animation: slidein .5s ease both;
+  }
+  .phone-link:hover { background: rgba(255,255,255,.18); }
+  @keyframes slidein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .stat-big { font-size: 2.4rem; font-weight: 800; letter-spacing: -1px; }
+  .feature-icon {
+    width: 56px; height: 56px; border-radius: 16px; display: inline-flex;
+    align-items: center; justify-content: center; font-size: 1.5rem; color: #fff;
+  }
+  .price-card { position: relative; }
+  .price-card.popular { border: 2px solid #6a5cff; }
+  .badge-popular { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); }
+  .table-compare th, .table-compare td { text-align: center; vertical-align: middle; }
+  .table-compare td:first-child, .table-compare th:first-child { text-align: left; }
+  .testimonial-card { min-height: 190px; }
+  .showcase-avatar { width: 52px; height: 52px; object-fit: cover; }
+  .accordion-button:not(.collapsed) { background: #eef2ff; color: #35306b; font-weight: 600; }
+  .cta-banner { background: linear-gradient(135deg, #6a5cff, #4c8dff); color: #fff; }
+  .social-proof-strip { background: #eef0fa; }
+</style>
+{% endblock %}
+
+{% block content %}
+{#============================ 1. HERO ============================#}
+<section class="hero py-5">
+  <div class="container py-4">
+    <div class="row align-items-center g-5">
+      <div class="col-lg-7 text-center text-lg-start">
+        <span class="badge rounded-pill bg-warning text-dark mb-3 px-3 py-2">
+          <i class="bi bi-stars me-1"></i>Free plan &mdash; no credit card required
+        </span>
+        <h1 class="display-3 fw-bold lh-1 mb-3">
+          One Link for All Your<br>Profiles, Content &amp; Business
+        </h1>
+        <p class="lead opacity-75 mb-4">
+          Claim your unique username, unify your digital footprint, and optimize your
+          personal brand for search&nbsp;&amp;&nbsp;AI discovery. Everything about you,
+          behind one memorable link.
+        </p>
+
+        {# Interactive username claim box #}
+        <form method="GET" action="{{ url_for('register') }}" id="claimForm"
+              class="claim-box mx-auto mx-lg-0" role="search">
+          <div class="input-group input-group-lg shadow rounded-3 overflow-hidden">
+            <span class="input-group-text bg-white border-0 fw-semibold">allmyprofiles.io/</span>
+            <input type="text" id="claimInput" name="username" class="form-control border-0"
+                   placeholder="yourname" autocomplete="off" spellcheck="false" maxlength="31"
+                   aria-label="Choose your username">
+            <button class="btn btn-warning fw-bold px-4" type="submit" id="claimBtn">
+              Claim My Link
+            </button>
+          </div>
+          <div class="form-text text-start mt-2 small" id="claimFeedback">
+            <i class="bi bi-lightning-charge me-1"></i>Type a handle to check availability instantly.
+          </div>
+        </form>
+
+        <div class="d-flex gap-2 justify-content-center justify-content-lg-start mt-4 small opacity-75">
+          <span><i class="bi bi-check-circle-fill text-success me-1"></i>Set up in 60 seconds</span>
+          <span class="d-none d-sm-inline">&nbsp;&bull;&nbsp;</span>
+          <span><i class="bi bi-check-circle-fill text-success me-1"></i>SEO + AI-search ready</span>
+          <span class="d-none d-md-inline">&nbsp;&bull;&nbsp;</span>
+          <span><i class="bi bi-check-circle-fill text-success me-1"></i>{{ free_max }} links free</span>
+        </div>
+      </div>
+
+      {# Visual product mockup (animated phone preview) #}
+      <div class="col-lg-5 d-none d-lg-block text-center">
+        <div class="phone-frame mx-auto">
+          <div class="phone-screen">
+            <div class="phone-notch"></div>
+            <img src="https://ui-avatars.com/api/?background=6a5cff&color=fff&size=128&name=AJ"
+                 class="rounded-circle mb-2" width="84" height="84" alt="Example profile avatar">
+            <div class="fw-bold fs-5">Alex Jordan</div>
+            <div class="small opacity-50 mb-3">@alexjordan &middot; Product Designer</div>
+            <a class="phone-link" style="animation-delay:.05s"><i class="bi bi-camera-reels me-1"></i>YouTube Channel</a>
+            <a class="phone-link" style="animation-delay:.15s"><i class="bi bi-briefcase me-1"></i>My Portfolio</a>
+            <a class="phone-link" style="animation-delay:.25s"><i class="bi bi-music-note-beamed me-1"></i>Spotify Playlist</a>
+            <a class="phone-link" style="animation-delay:.35s"><i class="bi bi-github me-1"></i>GitHub</a>
+            <a class="phone-link" style="animation-delay:.45s"><i class="bi bi-shop me-1"></i>Merch Store</a>
+            <div class="text-center small opacity-50 mt-3 pb-2">Made with AllMyProfiles</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{#==================== 2. SOCIAL PROOF & TRUST ====================#}
+<section class="social-proof-strip py-4">
+  <div class="container">
+    <div class="row text-center gy-3">
+      {% set counters = [
+        (stats.profiles, 'Profiles created'),
+        (stats.links, 'Links published'),
+        (stats.clicks, 'Clicks tracked'),
+      ] %}
+      {% for value, label in counters %}
+      <div class="col-4">
+        {# raw integer in data-count; JS adds thousands separators #}
+        <div class="stat-big text-primary" data-count="{{ '%d'|format(value) }}">0</div>
+        <div class="text-muted small text-uppercase fw-semibold">{{ label }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+{% if featured %}
+<section class="py-5">
+  <div class="container">
+    <div class="text-center mb-4">
+      <h2 class="fw-bold">Real pages, made in minutes</h2>
+      <p class="text-muted">A showcase of recently featured community profiles.</p>
+    </div>
+    <div class="row g-4 justify-content-center">
+      {% for f in featured %}
+      <div class="col-6 col-md-4 col-lg-2">
+        <a href="{{ url_for('public_profile', username=f.user.username) }}"
+           class="card h-100 p-3 text-center text-decoration-none lift">
+          <img src="{{ f.user.avatar_src }}" class="showcase-avatar rounded-circle mx-auto mb-2"
+               alt="{{ f.user.display_name }} profile picture" loading="lazy">
+          <div class="fw-semibold text-dark text-truncate">{{ f.user.display_name }}</div>
+          <div class="small text-muted text-truncate">@{{ f.user.username }}</div>
+          <div class="small text-primary mt-1">{{ f.link_count }} links live</div>
+        </a>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<section class="py-5 bg-white">
+  <div class="container">
+    <div class="text-center mb-4">
+      <h2 class="fw-bold">Loved by creators &amp; professionals</h2>
+    </div>
+    <div class="row g-4">
+      <div class="col-md-4">
+        <div class="card testimonial-card p-4 h-100">
+          <div class="text-warning mb-2">★★★★★</div>
+          <p class="fst-italic mb-3">&ldquo;I replaced five different link tools with one page.
+            My audience finally finds everything from one Instagram bio.&rdquo;</p>
+          <div class="mt-auto fw-semibold small">Maya R. <span class="text-muted fw-normal">&mdash; Content Creator, 120k followers</span></div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card testimonial-card p-4 h-100">
+          <div class="text-warning mb-2">★★★★★</div>
+          <p class="fst-italic mb-3">&ldquo;The click analytics told me my newsletter link was hiding
+            below the fold. Moved it up, signups doubled in a week.&rdquo;</p>
+          <div class="mt-auto fw-semibold small">Daniel K. <span class="text-muted fw-normal">&mdash; Freelance Developer</span></div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card testimonial-card p-4 h-100">
+          <div class="text-warning mb-2">★★★★★</div>
+          <p class="fst-italic mb-3">&ldquo;Our shop page shows up in AI search results now thanks to
+            the structured data. That alone sold me on the Full plan.&rdquo;</p>
+          <div class="mt-auto fw-semibold small">Priya S. <span class="text-muted fw-normal">&mdash; Small Business Owner</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{#================= 3. FEATURE HIGHLIGHTS =================#}
+<section class="py-5" id="features">
+  <div class="container">
+    <div class="text-center mb-5">
+      <h2 class="fw-bold">Everything you need to own your link</h2>
+      <p class="text-muted lead small">Built for humans <em>and</em> machines that read the web.</p>
+    </div>
+    <div class="row g-4">
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 p-4">
+          <span class="feature-icon" style="background:#6a5cff"><i class="bi bi-palette-fill"></i></span>
+          <h5 class="mt-3">Modular customization</h5>
+          <p class="text-muted mb-0 small">Custom themes and backgrounds, drag-and-drop link
+            ordering, dynamic embeds (YouTube, Spotify, GitHub), and flexible sections that
+            grow with your brand.</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 p-4 border-start border-4" style="border-color:#6a5cff !important">
+          <span class="feature-icon" style="background:#198754"><i class="bi bi-robot"></i></span>
+          <h5 class="mt-3">SEO &amp; AI search optimization <span class="badge bg-primary align-middle ms-1">Key differentiator</span></h5>
+          <p class="text-muted mb-0 small">Every profile is automatically structured with JSON-LD
+            schema markup and semantic blocks &mdash; so you rank higher on Google and get parsed
+            correctly by ChatGPT, Perplexity, and other AI search engines.</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 p-4">
+          <span class="feature-icon" style="background:#fd7e14"><i class="bi bi-graph-up-arrow"></i></span>
+          <h5 class="mt-3">Built-in traffic intelligence</h5>
+          <p class="text-muted mb-0 small">Clean first-party click tracking, Google Analytics /
+            Tag Manager integration, and tracking-pixel support (Meta &amp; Google) on advanced
+            plans &mdash; all from one insight dashboard.</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 p-4">
+          <span class="feature-icon" style="background:#0dcaf0"><i class="bi bi-hdd-network"></i></span>
+          <h5 class="mt-3">Link health monitoring</h5>
+          <p class="text-muted mb-0 small">We automatically check your links for dead ends and
+            notify you before your audience finds them. No more embarrassing 404s in your bio.</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 p-4">
+          <span class="feature-icon" style="background:#dc3545"><i class="bi bi-image"></i></span>
+          <h5 class="mt-3">Your brand, your avatar</h5>
+          <p class="text-muted mb-0 small">Upload a profile photo directly (stored locally, never
+            a third-party proxy), add a headline and bio, and share one clean, branded URL
+            everywhere.</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 p-4">
+          <span class="feature-icon" style="background:#ffc107;color:#333"><i class="bi bi-shield-check"></i></span>
+          <h5 class="mt-3">Privacy &amp; ownership</h5>
+          <p class="text-muted mb-0 small">No ad networks harvesting your visitors. Show or hide
+            links any time, keep drafts private, and export your data whenever you want.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{#================= 5. LIVE SANDBOX DEMO =================#}
+<section class="py-5 bg-white" id="demo">
+  <div class="container">
+    <div class="row align-items-center g-5">
+      <div class="col-lg-6">
+        <h2 class="fw-bold mb-3">Try it right now &mdash; no signup</h2>
+        <p class="text-muted">Type a title and URL below and watch your link stack render live
+          on a phone. This is exactly what your visitors will see.</p>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Link title</label>
+          <input type="text" id="demoTitle" class="form-control" placeholder="My Portfolio" maxlength="80">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Destination URL</label>
+          <input type="url" id="demoUrl" class="form-control" placeholder="https://example.com">
+        </div>
+        <button class="btn btn-primary rounded-pill px-4" id="demoAdd">
+          <i class="bi bi-plus-lg me-1"></i>Add to my stack
+        </button>
+        <button class="btn btn-outline-secondary rounded-pill px-3" id="demoReset" type="button">Reset</button>
+        <p class="text-muted small mt-3 mb-0">
+          <i class="bi bi-info-circle me-1"></i>Your real pages also support drag-to-reorder,
+          show/hide, and click stats.
+        </p>
+      </div>
+      <div class="col-lg-6 text-center">
+        <div class="phone-frame mx-auto" style="transform:rotate(-3deg)">
+          <div class="phone-screen">
+            <div class="phone-notch"></div>
+            <img src="https://ui-avatars.com/api/?background=random&name=You"
+                 class="rounded-circle mb-2" width="84" height="84" alt="Your avatar preview">
+            <div class="fw-bold fs-5">Your Name</div>
+            <div class="small opacity-50 mb-3">@yourname &middot; sandbox preview</div>
+            <div id="demoStack">
+              <div class="phone-link"><i class="bi bi-heart me-1"></i>Your first link here</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{#================= 4. PRICING MATRIX =================#}
+<section class="py-5" id="pricing">
+  <div class="container">
+    <div class="text-center mb-4">
+      <h2 class="fw-bold">Simple, transparent pricing</h2>
+      <p class="text-muted">Start free. Upgrade when your audience does.</p>
+      <div class="d-inline-flex align-items-center bg-white rounded-pill shadow-sm p-1 mt-2">
+        <button class="btn btn-sm rounded-pill px-3 billing-toggle fw-semibold" data-cycle="monthly">Monthly</button>
+        <button class="btn btn-sm rounded-pill px-3 billing-toggle" data-cycle="annual">
+          Annual <span class="badge bg-success">save 20%</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="row g-4 justify-content-center align-items-stretch">
+      {% set plans = [
+        {'name': 'Free', 'monthly': 0, 'annual': 0, 'tagline': 'Get online today',
+         'features': ['Basic profile page', 'Up to ' ~ free_max ~ ' links', 'Platform branding',
+                      'Basic view counts', 'Public /u/username URL'],
+         'cta': 'Get Started for Free'},
+        {'name': 'Expanded', 'monthly': 5, 'annual': 4, 'tagline': 'For growing creators',
+         'popular': True,
+         'features': ['Up to 10 links', 'Custom backgrounds &amp; styles', 'Standard analytics',
+                      'Avatar uploads', 'JSON-LD structured data'],
+         'cta': 'Start Expanded'},
+        {'name': 'Full', 'monthly': 12, 'annual': 10, 'tagline': 'For professionals',
+         'features': ['Unlimited links', 'Advanced analytics', 'Tracking pixels (Meta / Google)',
+                      'Zero ads &amp; zero branding', 'Priority support'],
+         'cta': 'Go Full'},
+        {'name': 'Custom', 'monthly': 29, 'annual': 24, 'tagline': 'For businesses &amp; power users',
+         'features': ['Everything in Full', 'Early access to beta features',
+                      'Direct line to the site admin', 'Custom options &amp; integrations',
+                      'White-glove onboarding'],
+         'cta': 'Talk to Us'},
+      ] %}
+      {% for p in plans %}
+      <div class="col-sm-6 col-lg-3">
+        <div class="card price-card h-100 p-4 {% if p.popular %}popular{% endif %}">
+          {% if p.popular %}<span class="badge-popular badge bg-primary">Most popular</span>{% endif %}
+          <h5 class="fw-bold mb-0">{{ p.name }}</h5>
+          <div class="small text-muted mb-3">{{ p.tagline|safe }}</div>
+          <div class="mb-1">
+            <span class="fs-2 fw-extrabold">$<span class="plan-price"
+              data-monthly="{{ p.monthly }}" data-annual="{{ p.annual }}">{{ p.monthly }}</span></span>
+            <span class="text-muted small">/mo</span>
+          </div>
+          <div class="small text-muted mb-3 plan-note" style="min-height:1.2em"></div>
+          <ul class="list-unstyled small flex-grow-1">
+            {% for feat in p.features %}
+            <li class="mb-2"><i class="bi bi-check-lg text-success me-2"></i>{{ feat|safe }}</li>
+            {% endfor %}
+          </ul>
+          <a href="{{ url_for('register') }}"
+             class="btn {{ 'btn-primary' if p.popular or p.name == 'Free' else 'btn-outline-primary' }} rounded-pill w-100 mt-2">
+            {{ p.cta }}
+          </a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="text-center text-muted small mt-4 mb-0">
+      Billing integration coming soon &mdash; current paid tiers are provisioned by the site admin.
+    </p>
+  </div>
+</section>
+
+{#================= 6. FAQ =================#}
+<section class="py-5 bg-white" id="faq">
+  <div class="container" style="max-width: 820px;">
+    <h2 class="fw-bold text-center mb-4">Frequently asked questions</h2>
+    <div class="accordion" id="faqAccordion">
+      {% set faqs = [
+        ('Can I use my own domain name?',
+         'Yes &mdash; custom domains are available on the Custom plan. Point your domain&rsquo;s DNS at us and we&rsquo;ll serve your profile page with SSL automatically. On lower plans you get a clean canonical URL like <code>/u/yourname</code>.'),
+        ('How do I add my Google Analytics or Meta tracking pixel?',
+         'On the Full and Custom plans, open the Dashboard&rarr;Integrations section, paste your GA4 Measurement ID, Google Tag Manager container, or Meta Pixel ID, and save. Pixels load only on your public profile pages and never track logged-in editing sessions.'),
+        ('Is there a limit on how many links I can add on paid tiers?',
+         'The Free plan includes ' ~ free_max ~ ' active links and Expanded includes 10. The Full and Custom plans are unlimited &mdash; publish as many links, embeds, and sections as you like. Hidden (inactive) links never count against your limit.'),
+        ('How does the platform help my profile show up in Google search results?',
+         'Every public profile ships with semantic HTML, Open Graph meta tags, and JSON-LD schema.org Person markup generated from your display name, headline, bio, and links. That means richer search snippets &mdash; and AI assistants like ChatGPT and Perplexity can accurately cite who you are and where you publish.'),
+        ('What happens if one of my links breaks?',
+         'Our automated link checker visits your links on a schedule. If a destination returns a 404 or errors out, you receive a heads-up in your inbox (throttled so you never get spammed about the same issue) so you can fix or hide it fast.'),
+      ] %}
+      {% for q, a in faqs %}
+      <div class="accordion-item">
+        <h3 class="accordion-header">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                  data-bs-target="#faq{{ loop.index }}">
+            {{ q }}
+          </button>
+        </h3>
+        <div id="faq{{ loop.index }}" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+          <div class="accordion-body text-muted">{{ a|safe }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+{#================= 7. FOOTER CTA BANNER =================#}
+<section class="py-5">
+  <div class="container">
+    <div class="cta-banner rounded-4 p-5 text-center shadow-lg">
+      <h2 class="fw-bold mb-2">Ready to unify your online presence?</h2>
+      <p class="opacity-75 mb-4">Join the creators, freelancers, and businesses already using
+        AllMyProfiles as their single source of truth on the web.</p>
+      <a href="{{ url_for('register') }}" class="btn btn-light btn-lg rounded-pill fw-bold px-5">
+        Get Started for Free
+      </a>
+      <div class="small opacity-75 mt-3">Free forever plan &middot; {{ free_max }} links included &middot; no credit card</div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- Animated stat counters ---------- */
+  var counted = false;
+  function animateCounters() {
+    if (counted) return;
+    counted = true;
+    document.querySelectorAll('[data-count]').forEach(function (el) {
+      var target = parseInt(el.getAttribute('data-count'), 10) || 0;
+      var start = null, dur = 1200;
+      function step(ts) {
+        if (!start) start = ts;
+        var p = Math.min((ts - start) / dur, 1);
+        el.textContent = Math.floor(target * (1 - Math.pow(1 - p, 3))).toLocaleString();
+        if (p < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    });
+  }
+  var strip = document.querySelector('.social-proof-strip');
+  if ('IntersectionObserver' in window && strip) {
+    new IntersectionObserver(function (entries, obs) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { animateCounters(); obs.disconnect(); }
+      });
+    }, { threshold: 0.3 }).observe(strip);
+  } else {
+    animateCounters();
+  }
+
+  /* ---------- Username availability checker ---------- */
+  var input = document.getElementById('claimInput');
+  var feedback = document.getElementById('claimFeedback');
+  var form = document.getElementById('claimForm');
+  var timer = null;
+  function checkName() {
+    var name = (input.value || '').trim().toLowerCase();
+    if (!name) {
+      feedback.innerHTML = '<i class="bi bi-lightning-charge me-1"></i>Type a handle to check availability instantly.';
+      feedback.className = 'form-text text-start mt-2 small';
+      return;
+    }
+    fetch('/api/check-username?username=' + encodeURIComponent(name))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.available) {
+          feedback.innerHTML = '<i class="bi bi-check-circle-fill avail-ok me-1"></i>' +
+            '<span class="avail-ok">allmyprofiles.io/' + name.replace(/[<>&]/g, '') + ' is available!</span>';
+        } else {
+          feedback.innerHTML = '<i class="bi bi-x-circle-fill avail-bad me-1"></i>' +
+            '<span class="avail-bad">' + d.message + '</span>';
+        }
+      })
+      .catch(function () {});
+  }
+  if (input) {
+    input.addEventListener('input', function () {
+      clearTimeout(timer);
+      timer = setTimeout(checkName, 350);
+    });
+  }
+  if (form) {
+    form.addEventListener('submit', function (ev) {
+      var name = (input.value || '').trim().toLowerCase();
+      if (!name) { ev.preventDefault(); input.focus(); return; }
+      input.value = name;   // register page prefills ?username=
+    });
+  }
+
+  /* ---------- Pricing monthly/annual toggle ---------- */
+  function setCycle(cycle) {
+    document.querySelectorAll('.billing-toggle').forEach(function (b) {
+      b.classList.toggle('fw-bold', b.dataset.cycle === cycle);
+      b.classList.toggle('bg-primary', b.dataset.cycle === cycle);
+      b.classList.toggle('text-white', b.dataset.cycle === cycle);
+    });
+    document.querySelectorAll('.plan-price').forEach(function (el) {
+      var m = parseFloat(el.dataset.monthly), a = parseFloat(el.dataset.annual);
+      el.textContent = (cycle === 'annual' ? a : m).toFixed(0);
+    });
+    document.querySelectorAll('.price-card').forEach(function (card) {
+      var note = card.querySelector('.plan-note');
+      var price = card.querySelector('.plan-price');
+      if (!note || !price) return;
+      var m = parseFloat(price.dataset.monthly);
+      if (m === 0) { note.textContent = ''; return; }
+      note.textContent = cycle === 'annual'
+        ? 'billed yearly ($' + (parseFloat(price.dataset.annual) * 12).toFixed(0) + '/yr)'
+        : 'billed monthly';
+    });
+  }
+  document.querySelectorAll('.billing-toggle').forEach(function (b) {
+    b.addEventListener('click', function () { setCycle(b.dataset.cycle); });
+  });
+  setCycle('monthly');
+
+  /* ---------- Live sandbox demo ---------- */
+  var stack = document.getElementById('demoStack');
+  var icons = ['bi-link-45deg', 'bi-briefcase', 'bi-camera-reels', 'bi-music-note-beamed',
+               'bi-shop', 'bi-envelope', 'bi-globe', 'bi-star'];
+  var iconIdx = 0;
+  function esc(s) {
+    return s.replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  var addBtn = document.getElementById('demoAdd');
+  if (addBtn) {
+    addBtn.addEventListener('click', function () {
+      var t = document.getElementById('demoTitle');
+      var u = document.getElementById('demoUrl');
+      var title = (t.value || '').trim() || 'Untitled link';
+      var url = (u.value || '').trim();
+      if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
+      var valid = url && /^https?:\/\/[^.]+\.[^.]+/i.test(url);
+      var div = document.createElement('span');
+      div.className = 'phone-link';
+      div.innerHTML = '<i class="bi ' + icons[iconIdx++ % icons.length] + ' me-1"></i>' +
+                      esc(title.slice(0, 60));
+      if (valid) div.href = '#';
+      div.title = valid ? url : 'Enter a valid URL to make this link clickable';
+      stack.appendChild(div);
+      t.value = ''; u.value = ''; t.focus();
+    });
+    document.getElementById('demoReset').addEventListener('click', function () {
+      stack.innerHTML = '<div class="phone-link"><i class="bi bi-heart me-1"></i>Your first link here</div>';
+      iconIdx = 0;
+    });
+  }
+})();
+</script>
+{% endblock %}

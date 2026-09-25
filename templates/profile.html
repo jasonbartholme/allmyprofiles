@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% block title %}{{ user.display_name }} (@{{ user.username }}) — AllMyProfiles{% endblock %}
+{% block description %}{{ user.headline or (user.display_name ~ ' — all my profiles in one place.') }}{% endblock %}
+
+{% block head %}
+{# Open Graph / SEO tags for the public profile #}
+<meta property="og:title" content="{{ user.display_name }} (@{{ user.username }})">
+<meta property="og:description" content="{{ user.headline or user.bio or 'All of ' ~ user.display_name ~ "'s profiles in one place." }}">
+<meta property="og:image" content="{{ user.avatar_src }}">
+<meta property="og:type" content="profile">
+<meta name="twitter:card" content="summary">
+<link rel="canonical" href="{{ request.url_root.rstrip('/') }}/u/{{ user.username }}">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "ProfilePage",
+  "mainEntity": {
+    "@type": "Person",
+    "name": "{{ user.display_name }}",
+    "alternateName": "{{ user.username }}",
+    {% if user.headline %}"description": "{{ user.headline }}",{% endif %}
+    "image": "{{ user.avatar_src }}",
+    "url": "{{ request.url_root.rstrip('/') }}/u/{{ user.username }}"
+    {% if links %},
+    "sameAs": [{% for link in links %}"{{ link.url }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+    {% endif %}
+  }
+}
+</script>
+<style>
+  body { background: linear-gradient(180deg, #1b1f3b 0%, #35306b 40%, #f7f8fc 40.1%, #f7f8fc 100%); }
+  .profile-card { max-width: 640px; margin: 0 auto; }
+  .profile-link {
+    display: flex; align-items: center; gap: .75rem;
+    background: #fff; color: #1b1f3b; text-decoration: none;
+    padding: .9rem 1.25rem; border-radius: 1rem; font-weight: 600;
+    box-shadow: 0 2px 10px rgba(30,40,90,.08);
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .profile-link:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(30,40,90,.15); color: #4c8dff; }
+  .profile-link .bi-2x { font-size: 1.4rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+  <div class="profile-card text-center px-3">
+    <img src="{{ user.avatar_src }}" alt="{{ user.display_name }} avatar"
+         class="rounded-circle border border-4 border-white shadow mb-3" width="110" height="110">
+    <h1 class="h3 fw-bold text-white">{{ user.display_name }}</h1>
+    <p class="text-white-50 mb-1">@{{ user.username }}</p>
+    {% if user.headline %}<p class="fw-semibold text-white">{{ user.headline }}</p>{% endif %}
+    {% if user.bio %}<p class="text-white-50">{{ user.bio }}</p>{% endif %}
+
+    <div class="d-grid gap-3 mt-4">
+      {% for link in links %}
+        <a class="profile-link" href="{{ url_for('redirect_link', link_id=link.id) }}"
+           target="_blank" rel="noopener me">
+          <i class="bi bi-{{ link.icon_code or 'link-45deg' }} bi-2x text-primary"></i>
+          <span class="flex-grow-1 text-start">{{ link.title }}</span>
+          <i class="bi bi-box-arrow-up-right text-muted"></i>
+        </a>
+      {% else %}
+        <p class="text-muted">No links yet — check back soon!</p>
+      {% endfor %}
+    </div>
+
+    {% if user.about_section %}
+    <div class="card p-4 mt-4 text-start">
+      <h5 class="fw-bold">About</h5>
+      <p class="mb-0" style="white-space: pre-wrap;">{{ user.about_section }}</p>
+    </div>
+    {% endif %}
+
+    <p class="mt-4 small">
+      <a href="{{ url_for('home') }}" class="text-decoration-none fw-semibold">
+        <i class="bi bi-link-45deg"></i> AllMyProfiles
+      </a>
+    </p>
+  </div>
+</div>
+{% endblock %}

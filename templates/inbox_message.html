@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block title %}{{ message.subject }} — Inbox — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 760px">
+  <a href="{{ url_for('inbox', **({'view': 'archived'} if read.is_archived else {})) }}"
+     class="text-decoration-none small">&larr; Back to inbox</a>
+
+  <div class="card mt-2 p-4">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+      <h3 class="fw-bold mb-1">{{ message.subject }}</h3>
+      <div class="text-nowrap">
+        <span class="badge text-bg-light border">{{ message.category_label }}</span>
+        <span class="badge text-bg-{{ message.severity_info.badge }}">{{ message.severity_info.label }}</span>
+      </div>
+    </div>
+    <div class="small text-muted mb-3">
+      {% if message.sender %}From <strong>{{ message.sender.display_name }}</strong> · {% endif %}
+      Sent {{ message.created_at.strftime('%B %d, %Y at %H:%M') }}
+      {% if message.source == 'link_check' %} · <i class="bi bi-robot"></i> automatic link-check report{% endif %}
+    </div>
+
+    <div class="msg-body">{{ message.body }}</div>
+
+    {% if message.action_url %}
+      <div class="mt-4">
+        <a class="btn btn-primary" href="{{ message.action_url }}"
+           target="_blank" rel="noopener noreferrer">
+          {{ message.action_label or 'Learn more' }} <i class="bi bi-box-arrow-up-right ms-1"></i>
+        </a>
+      </div>
+    {% endif %}
+
+    <hr>
+    <div class="d-flex gap-2">
+      {% if read.is_archived %}
+        <form method="POST" action="{{ url_for('inbox_unarchive', message_id=message.id) }}">
+          <button class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-archive-fill me-1"></i>Restore to inbox</button>
+        </form>
+      {% else %}
+        <form method="POST" action="{{ url_for('inbox_archive', message_id=message.id) }}">
+          <button class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-archive me-1"></i>Archive</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

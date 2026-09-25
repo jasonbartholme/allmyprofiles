@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% block title %}Terms of Service — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-5" style="max-width: 820px;">
+  <h1 class="fw-bold mb-1">Terms of Service</h1>
+  <p class="text-muted small">Last updated: {{ current_year }}</p>
+
+  <div class="card p-4 p-md-5">
+    <h5 class="fw-bold">1. The service</h5>
+    <p>AllMyProfiles provides a hosted "link in bio" profile page and associated tools
+      (analytics, link management, messaging). Free and paid tiers are described on the
+      home page; tier limits may be adjusted with reasonable notice.</p>
+
+    <h5 class="fw-bold mt-4">2. Your account</h5>
+    <p>You must provide accurate information and keep your password secure. You are
+      responsible for activity on your account. Usernames are assigned on a first-come
+      basis and may be reclaimed by the platform if inactive or abused.</p>
+
+    <h5 class="fw-bold mt-4">3. Acceptable use</h5>
+    <p>You agree not to publish content that is unlawful, hateful, harassing, deceptive,
+      infringing, spam, or adult content involving minors. Links must point to safe,
+      honest destinations. Violations may result in hidden links, suspension, or removal
+      after a Terms-of-Service notification in your inbox where appropriate.</p>
+
+    <h5 class="fw-bold mt-4">4. Uploaded images</h5>
+    <p>You keep ownership of avatars and images you upload, and you grant AllMyProfiles a
+      limited license to store and display them on your public profile. Remove an image by
+      uploading a new one or contacting support.</p>
+
+    <h5 class="fw-bold mt-4">5. Availability &amp; changes</h5>
+    <p>We aim for high availability but provide the service "as is" without warranties.
+      Features may change; material pricing changes will be announced at least 14 days in
+      advance via the site and user inbox.</p>
+
+    <h5 class="fw-bold mt-4">6. Termination</h5>
+    <p>You may delete your account at any time by contacting support. We may suspend or
+      terminate accounts that violate these terms.</p>
+
+    <h5 class="fw-bold mt-4">7. Contact</h5>
+    <p class="mb-0">Questions about these terms? Use our
+      <a href="{{ url_for('contact') }}">contact form</a>.</p>
+  </div>
+</div>
+{% endblock %}
