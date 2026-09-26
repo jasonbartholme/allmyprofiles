@@ -296,12 +296,14 @@ def create_app(config_name=None):
 
     # Initialize extensions
     db.init_app(app)
-    migrate = Migrate(app, db)  # noqa: F841  (enables `flask db` commands)
+    # render_as_batch=True makes Alembic use SQLite "batch" mode (table
+    # rebuild) for ALTERs, which SQLite needs; it's harmless on PostgreSQL.
+    migrate = Migrate(app, db, render_as_batch=True)
     login_manager.init_app(app)
 
     # When running under the plain dev server, make sure tables + default
     # settings exist. In production use `flask db upgrade` instead.
-    if config_name == 'development':
+    if config_name == 'development' and not os.environ.get('SKIP_AUTO_SCHEMA'):
         with app.app_context():
             _ensure_schema(db)
             Setting.seed_defaults()
