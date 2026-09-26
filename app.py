@@ -16,7 +16,7 @@ import re
 from datetime import datetime, timedelta
 
 from flask import (Flask, render_template, request, redirect, url_for, flash,
-                   abort, session, send_from_directory)
+                   abort, session, send_from_directory, Response)
 from flask_login import (LoginManager, login_user, logout_user,
                          login_required, current_user)
 from flask_migrate import Migrate
@@ -116,6 +116,7 @@ def create_app(config_name=None):
 
     register_routes(app)
     register_static_pages(app)
+    register_seo_routes(app)
     register_inbox_routes(app)
     register_admin_routes(app)
     register_admin_message_routes(app)
@@ -434,6 +435,65 @@ def register_routes(app):
             abort(404)
         return public_profile(username)
 
+    # ------------------------------------------------------------------
+    # AI grounding page — machine-readable facts about this site for
+    # LLM crawlers (GPTBot, PerplexityBot, ClaudeBot, ...). Linked from
+    # the footer. Kept crawlable via robots.txt; noindex is NOT set so
+    # search engines can surface it too.
+    # ------------------------------------------------------------------
+    @app.route('/ai-grounding')
+    def ai_grounding():
+        base = _site_base_url()
+        today = datetime.now().strftime('%Y-%m-%d')
+        profile_count = User.query.count()
+        link_count = db.session.query(func.count(Link.id)).scalar() or 0
+        click_total = db.session.query(func.coalesce(func.sum(
+            func.coalesce(Link.click_count, 0)), 0)).scalar() or 0
+        featured = (User.query.order_by(User.created_at.desc()).limit(5).all())
+        return render_template(
+            'ai_grounding.html', base=base, today=today,
+            profile_count=profile_count, link_count=link_count,
+            click_total=click_total, featured=featured, TIERS=TIERS)
+
+    @app.route('/llms.txt')
+    def llms_txt():
+        """Plain-text grounding summary for models that fetch /llms.txt."""
+        base = _site_base_url()
+        body = f"""# AllMyProfiles
+
+> One link for all your profiles, content, and business. Claim a unique
+> username, unify your digital footprint, and optimize your personal brand
+> for search and AI discovery. Every public profile ships with JSON-LD
+> schema.org markup and semantic HTML so Google, ChatGPT, and Perplexity
+> can parse it cleanly.
+
+## Key resources
+- Home / sign up: {base}/
+- AI grounding page (full facts): {base}/ai-grounding
+- Help center: {base}/help
+- Contact / support: {base}/contact
+- Terms of Service: {base}/terms
+- Privacy Policy: {base}/privacy
+- Sitemap index: {base}/sitemap.xml
+- Static pages sitemap: {base}/sitemap-static.xml
+- Profiles sitemap: {base}/sitemap-profiles-1.xml
+
+## Plans
+- Free: basic profile, up to 3 links, platform branding, basic view counts.
+- Expanded: more links, custom background/styles, standard analytics.
+- Full: advanced analytics, tracking pixels (Meta/Google), zero ads, priority support.
+- Custom: everything in Full plus early beta access and dedicated admin communication.
+
+## Public profile format
+- Canonical URL: {base}/u/<username>
+- Machine-readable link feed: {base}/u/<username>/links.xml
+- Each profile embeds schema.org ProfilePage + Person JSON-LD with sameAs
+  links to the owner's external profiles.
+"""
+        resp = Response(body, mimetype='text/plain')
+        resp.headers['Cache-Control'] = 'public, max-age=3600'
+        return resp
+
     @app.route('/redirect/<int:link_id>')
     def redirect_link(link_id):
         """ Outbound tracking wrapper route """
@@ -448,6 +508,89 @@ def register_routes(app):
     def uploaded_file(filename):
         """Serve user-uploaded images from the local uploads folder."""
         return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+    # ------------------------------------------------------------------
+    # Favicon (generated on the fly — no binary assets to commit)
+    # ------------------------------------------------------------------
+    _FAVICON_CACHE = {}
+
+    @app.route('/favicon.ico')
+    @app.route('/apple-touch-icon.png')
+    @app.route('/apple-touch-icon-<int:size>x<int:_size2>.png')
+    @app.route('/icon-<int:size>.png')
+    def favicon(size=64, **_ignored):
+        """Dynamically render the brand icon at the requested size.
+
+        Serves .ico for /favicon.ico and PNG for every other route so a
+        single generator covers all device/viewport icon requests
+        (desktop tabs, iOS home screen, Android, pinned tiles).
+        """
+        want_ico = request.path == '/favicon.ico'
+        size = max(16, min(int(size or 64), 512))
+        key = (size, want_ico)
+        if key not in _FAVICON_CACHE:
+            _FAVICON_CACHE[key] = _render_favicon(size, want_ico)
+        data, mime = _FAVICON_CACHE[key]
+        resp = Response(data, mimetype=mime)
+        resp.headers['Cache-Control'] = 'public, max-age=604800'
+        return resp
+
+
+def _render_favicon(size, as_ico):
+    """Draw the AllMyProfiles glyph (gradient tile + white link mark)."""
+    import base64
+    import io
+    from PIL import Image, ImageDraw
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        'static', 'favicon-source.png')
+    if os.path.exists(path):
+        img = Image.open(path).convert('RGBA').resize((size, size),
+                                                      Image.LANCZOS)
+    else:
+        s = 512
+        img = Image.new('RGBA', (s, s), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        r = s * 0.22
+        # Rounded gradient tile (top-left indigo -> bottom-right blue).
+        tile = Image.new('RGBA', (s, s), (0, 0, 0, 0))
+        td = ImageDraw.Draw(tile)
+        for y in range(s):
+            t = y / (s - 1)
+            color = (int(0x35 + (0x4C - 0x35) * t),
+                     int(0x30 + (0x8D - 0x30) * t),
+                     int(0x6B + (0xFF - 0x6B) * t), 255)
+            td.line([(0, y), (s, y)], fill=color)
+        mask = Image.new('L', (s, s), 0)
+        ImageDraw.Draw(mask).rounded_rectangle([0, 0, s - 1, s - 1],
+                                               radius=r, fill=255)
+        tile.putalpha(mask)
+        img = tile
+        draw = ImageDraw.Draw(img)
+        # Two interlocking chain links, drawn diagonally in white.
+        lw = int(s * 0.075)
+        rad = s * 0.115
+        off = s * 0.135
+        cx, cy = s / 2, s / 2
+        for dx in (-off, off):
+            x0 = cx + dx - rad * 1.35
+            y0 = cy + dx - rad
+            x1 = cx + dx + rad * 1.35
+            y1 = cy + dx + rad
+            draw.rounded_rectangle([x0, y0, x1, y1], radius=rad,
+                                   outline='white', width=lw)
+        img = img.rotate(-45, resample=Image.BICUBIC, expand=False)
+        img = img.resize((size, size), Image.LANCZOS)
+
+    buf = io.BytesIO()
+    if as_ico:
+        sizes = [x for x in (16, 24, 32, 48) if x <= max(size, 48)]
+        img.save(buf, format='ICO', sizes=[(x, x) for x in sizes] or [(size, size)])
+        mime = 'image/x-icon'
+    else:
+        img.save(buf, format='PNG')
+        mime = 'image/png'
+    return buf.getvalue(), mime
 
 
 # ==========================================
@@ -1006,6 +1149,181 @@ def register_static_pages(app):
 
 
 # ==========================================
+# SEO: robots.txt, XML sitemaps, browserconfig
+# ==========================================
+
+def _site_base_url():
+    """Absolute base URL for the current request (scheme + host)."""
+    return request.url_root.rstrip('/')
+
+
+def _iso_dt(dt):
+    if dt is None:
+        return ''
+    return dt.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+
+
+def _xml_response(body):
+    resp = Response(body, mimetype='application/xml')
+    resp.headers['Cache-Control'] = 'public, max-age=3600'
+    return resp
+
+
+def register_seo_routes(app):
+
+    # ---- robots.txt ------------------------------------------------------
+    @app.route('/robots.txt')
+    def robots_txt():
+        base = _site_base_url()
+        disallow = ['/admin', '/inbox', '/dashboard', '/api/', '/redirect/',
+                    '/login', '/logout', '/register', '/settings', '/uploads']
+        lines = ['User-agent: *', 'Disallow: /$']
+        lines += [f'Disallow: {p}' for p in disallow]
+        lines += [
+            '',
+            '# Allow public profile pages and their link feeds',
+            'Allow: /u/',
+            '',
+            '# AI crawlers are explicitly welcome (see /ai-grounding)',
+            'User-agent: GPTBot',
+            'Allow: /',
+            '',
+            'User-agent: OAI-SearchBot',
+            'Allow: /',
+            '',
+            'User-agent: ChatGPT-User',
+            'Allow: /',
+            '',
+            'User-agent: PerplexityBot',
+            'Allow: /',
+            '',
+            'User-agent: ClaudeBot',
+            'Allow: /',
+            '',
+            f'Sitemap: {base}/sitemap.xml',
+            '',
+        ]
+        return Response('\n'.join(lines), mimetype='text/plain')
+
+    # ---- Microsoft / Android tile manifest -------------------------------
+    @app.route('/browserconfig.xml')
+    def browserconfig_xml():
+        fav = url_for('favicon')
+        body = f"""<?xml version="1.0" encoding="utf-8"?>
+<browserconfig>
+  <msapplication>
+    <tile>
+      <square70x70logo src="{fav}?size=70"/>
+      <square150x150logo src="{fav}?size=150"/>
+      <square310x310logo src="{fav}?size=310"/>
+      <TileColor>#35306b</TileColor>
+    </tile>
+  </msapplication>
+</browserconfig>
+"""
+        return _xml_response(body)
+
+    # ---- Sitemap index ---------------------------------------------------
+    @app.route('/sitemap.xml')
+    def sitemap_index():
+        base = _site_base_url()
+        today = datetime.now().strftime('%Y-%m-%d')
+        urls = [
+            ('/sitemap-static.xml', 'daily'),
+            ('/sitemap-profiles-1.xml', 'hourly'),
+        ]
+        parts = ['<?xml version="1.0" encoding="UTF-8"?>',
+                 '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+        for loc, freq in urls:
+            parts.append(f'  <sitemap><loc>{base}{loc}</loc>'
+                         f'<lastmod>{today}</lastmod></sitemap>')
+        # Chunked profile sitemaps so huge sites stay under the 50k limit.
+        user_total = User.query.count()
+        chunks = max(1, -(-user_total // 50000))
+        for i in range(2, chunks + 1):
+            parts.append(f'  <sitemap><loc>{base}/sitemap-profiles-{i}.xml</loc>'
+                         f'<lastmod>{today}</lastmod></sitemap>')
+        parts.append('</sitemapindex>')
+        return _xml_response('\n'.join(parts))
+
+    # ---- Static marketing/support pages ----------------------------------
+    @app.route('/sitemap-static.xml')
+    def sitemap_static():
+        base = _site_base_url()
+        today = datetime.now().strftime('%Y-%m-%d')
+        entries = [
+            ('/', 'daily', '1.0'),
+            ('/help', 'weekly', '0.6'),
+            ('/contact', 'monthly', '0.4'),
+            ('/ai-grounding', 'weekly', '0.7'),
+            ('/terms', 'yearly', '0.2'),
+            ('/privacy', 'yearly', '0.2'),
+        ]
+        parts = ['<?xml version="1.0" encoding="UTF-8"?>',
+                 '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+        for path, freq, prio in entries:
+            parts.append(f'  <url><loc>{base}{path}</loc>'
+                         f'<lastmod>{today}</lastmod>'
+                         f'<changefreq>{freq}</changefreq>'
+                         f'<priority>{prio}</priority></url>')
+        parts.append('</urlset>')
+        return _xml_response('\n'.join(parts))
+
+    # ---- Public profile pages (chunked, auto-generated) ------------------
+    @app.route('/sitemap-profiles-<int:page>.xml')
+    def sitemap_profiles(page):
+        page = max(1, page)
+        per_page = 50000
+        base = _site_base_url()
+        users = (User.query.order_by(User.created_at.desc())
+                 .offset((page - 1) * per_page).limit(per_page).all())
+        parts = ['<?xml version="1.0" encoding="UTF-8"?>',
+                 '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
+                 ' xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">']
+        for u in users:
+            lastmod = _iso_dt(getattr(u, 'updated_at', None) or u.created_at)
+            canonical = f'{base}/u/{u.username}'
+            links_feed = f'{base}/u/{u.username}/links.xml'
+            avatar = u.avatar_src
+            if avatar and not avatar.startswith('http'):
+                avatar = base + url_for('uploaded_file', filename=avatar) \
+                    if not avatar.startswith('/') else base + avatar
+            parts.append(
+                f'  <url><loc>{canonical}</loc>'
+                f'<lastmod>{lastmod}</lastmod>'
+                f'<changefreq>hourly</changefreq><priority>0.8</priority>')
+            if avatar:
+                parts.append(f'<image:image><image:loc>{avatar}</image:loc>'
+                             f'</image:image>')
+            parts.append('</url>')
+            parts.append(f'  <url><loc>{links_feed}</loc>'
+                         f'<lastmod>{lastmod}</lastmod>'
+                         f'<changefreq>hourly</changefreq>'
+                         f'<priority>0.5</priority></url>')
+        parts.append('</urlset>')
+        return _xml_response('\n'.join(parts))
+
+    # ---- Per-user link feed (XML) ----------------------------------------
+    @app.route('/u/<username>/links.xml')
+    def user_links_xml(username):
+        user = User.query.filter_by(username=username.lower()).first_or_404()
+        base = _site_base_url()
+        links = (Link.query.filter_by(user_id=user.id, is_active=True)
+                 .order_by(Link.position.asc()).all())
+        parts = ['<?xml version="1.0" encoding="UTF-8"?>',
+                 f'<links user="{user.username}" display_name="{user.display_name}"'
+                 f' profile="{base}/u/{user.username}">']
+        for l in links:
+            parts.append(f'  <link position="{l.position}">'
+                         f'<title>{l.title}</title>'
+                         f'<url>{l.url}</url>'
+                         f'<clicks>{l.click_count or 0}</clicks>'
+                         f'</link>')
+        parts.append('</links>')
+        return _xml_response('\n'.join(parts))
+
+
+# ==========================================
 # Error Handlers & Template Helpers
 # ==========================================
 
@@ -1033,12 +1351,41 @@ def register_template_context(app):
         unread = 0
         if current_user.is_authenticated:
             unread = current_user.unread_messages
+
+        # --- Canonical URL + robots directive -------------------------
+        # Public, marketing, and profile pages are indexable even when the
+        # viewer happens to be logged in. Everything behind auth (dashboard,
+        # inbox, admin) is noindex,nofollow so bots never see private state.
+        PUBLIC_INDEXABLE = {'home', 'public_profile', 'public_profile_alias',
+                            'help_center', 'contact', 'terms', 'privacy',
+                            'ai_grounding'}
+        endpoint = request.endpoint
+        noindex = (endpoint not in PUBLIC_INDEXABLE) or _is_impersonating()
+        if noindex:
+            page_robots = 'noindex, nofollow, noimageindex'
+        else:
+            page_robots = ('index, follow, max-image-preview:large, '
+                           'max-snippet:-1, max-video-preview:-1')
+
+        site_url = request.url_root.rstrip('/')
+        # Strip query strings for a clean canonical (except pagination).
+        args = {k: v for k, v in request.args.items()
+                if k in ('page',)}
+        canonical_url = request.base_url
+        if args:
+            from urllib.parse import urlencode
+            canonical_url += '?' + urlencode(args)
+
         return {
             'current_year': datetime.now().year,
             'APP_ENV': os.environ.get('FLASK_ENV', 'development'),
             'site_tagline': Setting.get('site_tagline'),
             'TIERS': TIERS,
             'unread_count': unread,
+            'canonical_url': canonical_url,
+            'site_url': site_url,
+            'site_name': 'AllMyProfiles',
+            'page_robots': page_robots,
         }
 
 
