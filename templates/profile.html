@@ -3,6 +3,10 @@
 {% block description %}{{ user.headline or (user.display_name ~ ' — all my profiles in one place.') }}{% endblock %}
 
 {% block head %}
+{# Adult-oriented profiles are excluded from search & AI indexing #}
+{% if user.is_adult_oriented %}
+<meta name="robots" content="noindex, nofollow, noimageindex">
+{% endif %}
 {# Open Graph / SEO tags for the public profile #}
 <meta property="og:title" content="{{ user.display_name }} (@{{ user.username }})">
 <meta property="og:description" content="{{ user.headline or user.bio or 'All of ' ~ user.display_name ~ "'s profiles in one place." }}">
@@ -13,11 +17,17 @@
 {
   "@context": "https://schema.org",
   "@type": "ProfilePage",
+  {% if user.is_adult_oriented %}"contentRating": "adult-content",{% endif %}
   "mainEntity": {
     "@type": "Person",
     "name": "{{ user.display_name }}",
     "alternateName": "{{ user.username }}",
     {% if user.headline %}"description": "{{ user.headline }}",{% endif %}
+    {% if skills %}"knowsAbout": [{% for s in skills %}"{{ s }}"{% if not loop.last %}, {% endif %}{% endfor %}],{% endif %}
+    {% if user.location %}"address": {
+      "@type": "PostalAddress",
+      "addressLocality": "{{ user.location }}"
+    },{% endif %}
     "image": "{{ user.avatar_src }}",
     "url": "{{ request.url_root.rstrip('/') }}/u/{{ user.username }}"
     {% if links %},
@@ -38,7 +48,26 @@
   }
   .profile-link:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(30,40,90,.15); color: #4c8dff; }
   .profile-link .bi-2x { font-size: 1.4rem; }
+  .skill-badge {
+    display: inline-block; background: rgba(255,255,255,.14); color: #fff;
+    border: 1px solid rgba(255,255,255,.25); border-radius: 2rem;
+    padding: .25rem .75rem; font-size: .8rem; font-weight: 600;
+    backdrop-filter: blur(4px);
+  }
+  .video-wrap { position: relative; padding-top: 56.25%; border-radius: 1rem;
+                overflow: hidden; box-shadow: 0 2px 10px rgba(30,40,90,.15); }
+  .video-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 </style>
+{% if user.ga4_id %}
+{# Per-user Google Analytics 4 (privacy-enhanced, no cookies by default) #}
+<script async src="https://www.googletagmanager.com/gtag/js?id={{ user.ga4_id }}"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', '{{ user.ga4_id }}', { anonymize_ip: true });
+</script>
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -48,8 +77,24 @@
          class="rounded-circle border border-4 border-white shadow mb-3" width="110" height="110">
     <h1 class="h3 fw-bold text-white">{{ user.display_name }}</h1>
     <p class="text-white-50 mb-1">@{{ user.username }}</p>
+    {% if user.location %}
+    <p class="text-white-50 small mb-1"><i class="bi bi-geo-alt me-1"></i>{{ user.location }}</p>
+    {% endif %}
     {% if user.headline %}<p class="fw-semibold text-white">{{ user.headline }}</p>{% endif %}
     {% if user.bio %}<p class="text-white-50">{{ user.bio }}</p>{% endif %}
+    {% if skills %}
+    <div class="d-flex flex-wrap justify-content-center gap-2 mt-2" aria-label="Skills">
+      {% for skill in skills %}<span class="skill-badge">{{ skill }}</span>{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if video %}
+    <div class="ratio ratio-16x9 my-4 rounded-4 shadow" style="--bs-aspect-ratio: 56.25%;">
+      <iframe src="{{ video }}" title="{{ user.display_name }} intro video"
+              loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; picture-in-picture"
+              allowfullscreen></iframe>
+    </div>
+    {% endif %}
 
     <div class="d-grid gap-3 mt-4">
       {% for link in links %}

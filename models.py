@@ -95,6 +95,23 @@ class User(UserMixin, db.Model):
     tier = db.Column(db.String(20), default='Free')  # Free, Expanded, Full, Custom
     tier_changed_at = db.Column(db.DateTime, nullable=True)
 
+    # Profile extras (from Colab mockup spec)
+    # Skills: short comma-separated list rendered as badges on the public
+    # profile (e.g. "Python, Flask, UI/UX"). Normalized/capped in app.py.
+    skills = db.Column(db.String(300), nullable=True)
+    location = db.Column(db.String(120), nullable=True)
+    # Adult-oriented content flag. When True the profile renders an
+    # age-gate interstitial and sends `noindex, nofollow` meta so it is
+    # excluded from search/AI indexing.
+    is_adult_oriented = db.Column(db.Boolean, default=False,
+                                  nullable=False, server_default='0')
+    # Intro video embed: platform is 'youtube' or 'vimeo' (None = disabled)
+    video_platform = db.Column(db.String(10), nullable=True)
+    video_id = db.Column(db.String(64), nullable=True)
+    # Per-user Google Analytics 4 Measurement ID (e.g. "G-ABC123XYZ9").
+    # Validated against ^G-[A-Z0-9]{6,20}$ before being stored/rendered.
+    ga4_id = db.Column(db.String(32), nullable=True)
+
     # Site administration flag
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
 

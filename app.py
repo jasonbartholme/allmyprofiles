@@ -11,6 +11,7 @@ Run in production (PostgreSQL):
     gunicorn "app:create_app('production')"
 """
 
+import json
 import os
 import re
 from datetime import datetime, timedelta
@@ -83,6 +84,81 @@ def admin_required(view):
             abort(403)
         return view(*args, **kwargs)
     return wrapped
+
+
+# ----------------------------------------------------------------------
+# Profile-extras helpers (skills / video / GA4) — shared by form handling
+# and template rendering.
+# ----------------------------------------------------------------------
+
+MAX_SKILLS = 12          # badge cap so profiles stay readable
+SKILL_MAX_LEN = 30       # per-skill character cap
+GA4_RE = re.compile(r'^G-[A-Z0-9]{6,20}$')
+YOUTUBE_ID_RE = re.compile(r'^[0-9A-Za-z_\-]{11}$')
+VIMEO_ID_RE = re.compile(r'^\d{6,12}$')
+
+
+def normalize_skills(raw):
+    """Parse a comma-separated skills string into a clean list.
+
+    Trims whitespace, drops empties/dupes (case-insensitive), caps each
+    entry's length and the total count. Returns [] for no skills.
+    """
+    if not raw:
+        return []
+    seen, out = set(), []
+    for part in raw.split(','):
+        skill = part.strip()[:SKILL_MAX_LEN].strip()
+        if not skill:
+            continue
+        key = skill.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(skill)
+        if len(out) >= MAX_SKILLS:
+            break
+    return out
+
+
+def parse_video_url(raw):
+    """Extract (platform, video_id) from a YouTube/Vimeo URL or bare ID.
+
+    Accepts youtube.com/watch?v=ID, youtu.be/ID, vimeo.com/ID, or a raw
+    ID paired with an explicit platform elsewhere. Returns None when the
+    input is empty/unrecognized.
+    """
+    url = (raw or '').strip()
+    if not url:
+        return None
+    m = re.search(r'(?:v=|youtu\.be/)([0-9A-Za-z_\-]{11})', url)
+    if 'youtube.com' in url.lower() or 'youtu.be' in url.lower():
+        if m and YOUTUBE_ID_RE.match(m.group(1)):
+            return ('youtube', m.group(1))
+        return None
+    if 'vimeo.com' in url.lower():
+        m = re.search(r'vimeo\.com/(\d{6,12})', url)
+        if m:
+            return ('vimeo', m.group(1))
+        return None
+    # Bare value: treat as an ID if it matches one of the known shapes.
+    if YOUTUBE_ID_RE.match(url):
+        return ('youtube', url)
+    if VIMEO_ID_RE.match(url):
+        return ('vimeo', url)
+    return None
+
+
+def video_embed(user):
+    """Return a privacy-enhanced embed iframe URL for a user's intro
+    video, or None. Only ever built from validated ids/platforms."""
+    if not user.video_platform or not user.video_id:
+        return None
+    if user.video_platform == 'youtube' and YOUTUBE_ID_RE.match(user.video_id):
+        return f'https://www.youtube-nocookie.com/embed/{user.video_id}'
+    if user.video_platform == 'vimeo' and VIMEO_ID_RE.match(user.video_id):
+        return f'https://player.vimeo.com/video/{user.video_id}'
+    return None
 
 
 def create_app(config_name=None):
@@ -287,6 +363,36 @@ def register_routes(app):
                 current_user.headline = request.form.get('headline')
                 current_user.bio = request.form.get('bio')
                 current_user.about_section = request.form.get('about_section')
+                current_user.location = (request.form.get('location')
+                                         or '').strip()[:120] or None
+                # Skills: normalized list, stored back as a clean CSV string.
+                skills = normalize_skills(request.form.get('skills'))
+                current_user.skills = ', '.join(skills) or None
+                # Adult-content flag (checkbox posts 'on' when ticked).
+                current_user.is_adult_oriented = bool(
+                    request.form.get('is_adult_oriented'))
+                # Intro video: accept full URL or bare ID; store validated id.
+                video_raw = (request.form.get('intro_video') or '').strip()
+                if video_raw:
+                    parsed = parse_video_url(video_raw)
+                    if parsed:
+                        current_user.video_platform, current_user.video_id = parsed
+                    else:
+                        flash('Intro video not recognized — use a YouTube or '
+                              'Vimeo link (or remove it to clear).', 'warning')
+                elif request.form.get('clear_video'):
+                    current_user.video_platform = None
+                    current_user.video_id = None
+                # GA4 measurement id: strict format check before storing.
+                ga4 = (request.form.get('ga4_id') or '').strip().upper()
+                if ga4:
+                    if GA4_RE.match(ga4):
+                        current_user.ga4_id = ga4
+                    else:
+                        flash('GA4 ID looks invalid — expected format like '
+                              'G-ABC123XYZ9. Not changed.', 'warning')
+                elif request.form.get('clear_ga4'):
+                    current_user.ga4_id = None
                 avatar_url = (request.form.get('avatar_url') or '').strip()
                 if avatar_url:
                     current_user.avatar_url = avatar_url
@@ -425,7 +531,23 @@ def register_routes(app):
         user = User.query.filter_by(username=username.lower()).first_or_404()
         active_links = (Link.query.filter_by(user_id=user.id, is_active=True)
                         .order_by(Link.position.asc()).all())
-        return render_template('profile.html', user=user, links=active_links)
+        # Adult-content gate: require a one-time age confirmation before
+        # any profile content is rendered to the visitor/session.
+        if user.is_adult_oriented and not session.get('age_ok'):
+            return render_template('profile_agegate.html', user=user)
+        return render_template('profile.html', user=user, links=active_links,
+                               skills=normalize_skills(user.skills),
+                               video=video_embed(user))
+
+    @app.route('/u/<username>/confirm-age', methods=['POST'])
+    def confirm_age(username):
+        """Age confirmation for adult-oriented profiles (18+)."""
+        user = User.query.filter_by(username=username.lower()).first_or_404()
+        if not user.is_adult_oriented:
+            return redirect(url_for('public_profile', username=user.username))
+        if request.form.get('confirm') == 'yes':
+            session['age_ok'] = True
+        return redirect(url_for('public_profile', username=user.username))
 
     # Convenience alias so bare /<username> also works (kept last so it
     # never shadows the routes above).
@@ -995,6 +1117,8 @@ def register_admin_routes(app):
 
     # Expose helpers to templates
     app.jinja_env.globals['is_impersonating'] = _is_impersonating
+    app.jinja_env.filters['skills_list'] = normalize_skills
+    app.jinja_env.globals['video_embed'] = video_embed
 
 
 # ==========================================
@@ -1281,6 +1405,10 @@ def register_seo_routes(app):
                  '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
                  ' xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">']
         for u in users:
+            # Adult-oriented profiles carry noindex — exclude them from
+            # sitemaps so crawlers aren't pointed at non-indexable URLs.
+            if getattr(u, 'is_adult_oriented', False):
+                continue
             lastmod = _iso_dt(getattr(u, 'updated_at', None) or u.created_at)
             canonical = f'{base}/u/{u.username}'
             links_feed = f'{base}/u/{u.username}/links.xml'

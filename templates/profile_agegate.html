@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}Age confirmation — AllMyProfiles{% endblock %}
+{% block robots_meta %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+
+{% block head %}
+<link rel="canonical" href="{{ request.url_root.rstrip('/') }}/u/{{ user.username }}">
+<style>
+  .agegate-card { max-width: 480px; margin: 12vh auto; }
+</style>
+{% endblock %}
+
+{% block content %}
+{# Nothing about this profile's links/content is rendered until confirmed. #}
+<div class="container">
+  <div class="agegate-card card shadow p-4 text-center">
+    <div class="display-6 mb-2"><i class="bi bi-shield-lock"></i></div>
+    <h1 class="h4 fw-bold">Age-restricted profile</h1>
+    <p class="text-muted mb-1">
+      This profile has been marked as containing adult-oriented content by
+      its owner and is intended for visitors 18 years or older.
+    </p>
+    <p class="small text-muted">By continuing you confirm that you are at least
+      18 years old (or the age of majority where you live).</p>
+    <form method="post" action="{{ url_for('confirm_age', username=user.username) }}"
+          class="d-grid gap-2 mt-3">
+      <button type="submit" name="confirm" value="yes" class="btn btn-primary btn-lg">
+        I am 18 or older — continue
+      </button>
+      <a href="{{ url_for('home') }}" class="btn btn-outline-secondary">Leave</a>
+    </form>
+  </div>
+</div>
+{% endblock %}
