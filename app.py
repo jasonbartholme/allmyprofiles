@@ -11,6 +11,7 @@ Run in production (PostgreSQL):
     gunicorn "app:create_app('production')"
 """
 
+import json
 import os
 import re
 from datetime import datetime, timedelta
@@ -24,8 +25,10 @@ from sqlalchemy import func
 
 from config import config_by_name
 from models import (db, User, Link, Setting, Activity, Message, MessageRead,
-                    LinkCheckResult, MESSAGE_CATEGORIES, MESSAGE_SEVERITIES,
-                    PAID_TIERS)
+                    LinkCheckResult, LinkSource, ContactMessage, AbuseReport,
+                    REPORT_REASONS, REPORT_STATUSES,
+                    LINK_CATEGORIES, MESSAGE_CATEGORIES, MESSAGE_SEVERITIES,
+                    PAID_TIERS, HEX_COLOR_RE)
 from uploads_util import save_upload_image, delete_upload_image
 
 login_manager = LoginManager()
@@ -44,8 +47,8 @@ IMPERSONATION_KEY = 'impersonator_id'
 RESERVED_USERNAMES = {
     'admin', 'api', 'app', 'assets', 'about', 'blog', 'css', 'dashboard',
     'docs', 'help', 'img', 'inbox', 'js', 'login', 'logout', 'pricing',
-    'privacy', 'profile', 'redirect', 'register', 'settings', 'static',
-    'status', 'support', 'terms', 'test', 'uploads', 'u', 'www',
+    'privacy', 'profile', 'redirect', 'register', 'report', 'settings',
+    'static', 'status', 'support', 'terms', 'test', 'uploads', 'u', 'www',
 }
 
 USERNAME_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{2,30}$')
@@ -83,6 +86,142 @@ def admin_required(view):
             abort(403)
         return view(*args, **kwargs)
     return wrapped
+
+
+# ----------------------------------------------------------------------
+# Profile-extras helpers (skills / video / GA4) — shared by form handling
+# and template rendering.
+# ----------------------------------------------------------------------
+
+MAX_SKILLS = 12          # badge cap so profiles stay readable
+SKILL_MAX_LEN = 30       # per-skill character cap
+GA4_RE = re.compile(r'^G-[A-Z0-9]{6,20}$')
+YOUTUBE_ID_RE = re.compile(r'^[0-9A-Za-z_\-]{11}$')
+VIMEO_ID_RE = re.compile(r'^\d{6,12}$')
+
+
+def normalize_skills(raw):
+    """Parse a comma-separated skills string into a clean list.
+
+    Trims whitespace, drops empties/dupes (case-insensitive), caps each
+    entry's length and the total count. Returns [] for no skills.
+    """
+    if not raw:
+        return []
+    seen, out = set(), []
+    for part in raw.split(','):
+        skill = part.strip()[:SKILL_MAX_LEN].strip()
+        if not skill:
+            continue
+        key = skill.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(skill)
+        if len(out) >= MAX_SKILLS:
+            break
+    return out
+
+
+def parse_video_url(raw):
+    """Extract (platform, video_id) from a YouTube/Vimeo URL or bare ID.
+
+    Accepts youtube.com/watch?v=ID, youtu.be/ID, vimeo.com/ID, or a raw
+    ID paired with an explicit platform elsewhere. Returns None when the
+    input is empty/unrecognized.
+    """
+    url = (raw or '').strip()
+    if not url:
+        return None
+    m = re.search(r'(?:v=|youtu\.be/)([0-9A-Za-z_\-]{11})', url)
+    if 'youtube.com' in url.lower() or 'youtu.be' in url.lower():
+        if m and YOUTUBE_ID_RE.match(m.group(1)):
+            return ('youtube', m.group(1))
+        return None
+    if 'vimeo.com' in url.lower():
+        m = re.search(r'vimeo\.com/(\d{6,12})', url)
+        if m:
+            return ('vimeo', m.group(1))
+        return None
+    # Bare value: treat as an ID if it matches one of the known shapes.
+    if YOUTUBE_ID_RE.match(url):
+        return ('youtube', url)
+    if VIMEO_ID_RE.match(url):
+        return ('vimeo', url)
+    return None
+
+
+def video_embed(user):
+    """Return a privacy-enhanced embed iframe URL for a user's intro
+    video, or None. Only ever built from validated ids/platforms."""
+    if not user.video_platform or not user.video_id:
+        return None
+    if user.video_platform == 'youtube' and YOUTUBE_ID_RE.match(user.video_id):
+        return f'https://www.youtube-nocookie.com/embed/{user.video_id}'
+    if user.video_platform == 'vimeo' and VIMEO_ID_RE.match(user.video_id):
+        return f'https://player.vimeo.com/video/{user.video_id}'
+    return None
+
+
+# ==========================================
+# Profile redesign helpers: curated themes + link grouping
+# ==========================================
+
+# Curated profile themes. Each entry is a *pre-checked* combination of
+# background / text colors (contrast ratio >= 4.5:1) plus an optional
+# background image URL, so users can restyle their profile without ever
+# producing unreadable combinations. Admin-managed via LinkSource-style
+# curation; users pick a key only.
+PROFILE_THEMES = {
+    'light':   {'label': 'Daylight',   'bg_color': '#f4f6f8', 'text_color': '#333333', 'bg_image_url': None},
+    'paper':   {'label': 'Paper',      'bg_color': '#fdfaf5', 'text_color': '#3d3427', 'bg_image_url': None},
+    'mint':    {'label': 'Fresh Mint', 'bg_color': '#e8f6f0', 'text_color': '#1e4d3b', 'bg_image_url': None},
+    'sky':     {'label': 'Clear Sky',  'bg_color': '#e9f3fb', 'text_color': '#1c3d5a', 'bg_image_url': None},
+    'blush':   {'label': 'Blush',      'bg_color': '#fbeef1', 'text_color': '#5c2338', 'bg_image_url': None},
+    'sand':    {'label': 'Desert Sand','bg_color': '#f6efe4', 'text_color': '#4a3b22', 'bg_image_url': None},
+    'lavender':{'label': 'Lavender',   'bg_color': '#f0ecfa', 'text_color': '#3b2e63', 'bg_image_url': None},
+    'slate':   {'label': 'Slate',      'bg_color': '#2b3038', 'text_color': '#e8eaed', 'bg_image_url': None},
+    'midnight':{'label': 'Midnight',   'bg_color': '#12141f', 'text_color': '#dfe3ff', 'bg_image_url': None},
+    'forest':  {'label': 'Forest',     'bg_color': '#14291f', 'text_color': '#d8ecd9', 'bg_image_url': None},
+}
+DEFAULT_THEME = 'light'
+
+
+def theme_for_user(user):
+    """Resolve the user's chosen theme into the dict the template expects.
+
+    Returns keys matching the mockup contract: bg_color, text_color,
+    bg_image_url (None unless a future premium theme sets one).
+    """
+    t = PROFILE_THEMES.get(getattr(user, 'theme', None) or DEFAULT_THEME,
+                           PROFILE_THEMES[DEFAULT_THEME])
+    return {
+        'bg_color': t['bg_color'],
+        'text_color': t['text_color'],
+        'bg_image_url': t.get('bg_image_url'),
+    }
+
+
+def group_links_for_profile(links):
+    """Split active links into pinned + categorized groups (mockup §2).
+
+    Pinned links render first with a gold accent; remaining links are
+    bucketed by display category in LINK_CATEGORIES order (unknown
+    categories appended alphabetically).
+    """
+    pinned = [l for l in links if l.is_pinned]
+    categorized = {}
+    for l in links:
+        if l.is_pinned:
+            continue
+        categorized.setdefault(l.display_category, []).append(l)
+    ordered = {}
+    for cat in LINK_CATEGORIES:
+        if cat in categorized:
+            ordered[cat] = categorized.pop(cat)
+    for cat in sorted(categorized):
+        ordered[cat] = categorized[cat]
+    return pinned, ordered
 
 
 def create_app(config_name=None):
@@ -287,6 +426,50 @@ def register_routes(app):
                 current_user.headline = request.form.get('headline')
                 current_user.bio = request.form.get('bio')
                 current_user.about_section = request.form.get('about_section')
+                current_user.location = (request.form.get('location')
+                                         or '').strip()[:120] or None
+                # Skills: normalized list, stored back as a clean CSV string.
+                skills = normalize_skills(request.form.get('skills'))
+                current_user.skills = ', '.join(skills) or None
+                # Adult-content flag (checkbox posts 'on' when ticked).
+                current_user.is_adult_oriented = bool(
+                    request.form.get('is_adult_oriented'))
+                # Intro video: accept full URL or bare ID; store validated id.
+                video_raw = (request.form.get('intro_video') or '').strip()
+                if video_raw:
+                    parsed = parse_video_url(video_raw)
+                    if parsed:
+                        current_user.video_platform, current_user.video_id = parsed
+                    else:
+                        flash('Intro video not recognized — use a YouTube or '
+                              'Vimeo link (or remove it to clear).', 'warning')
+                elif request.form.get('clear_video'):
+                    current_user.video_platform = None
+                    current_user.video_id = None
+                # GA4 measurement id: strict format check before storing.
+                ga4 = (request.form.get('ga4_id') or '').strip().upper()
+                if ga4:
+                    if GA4_RE.match(ga4):
+                        current_user.ga4_id = ga4
+                    else:
+                        flash('GA4 ID looks invalid — expected format like '
+                              'G-ABC123XYZ9. Not changed.', 'warning')
+                elif request.form.get('clear_ga4'):
+                    current_user.ga4_id = None
+                # Curated theme: only accept known keys; free tier is
+                # restricted to the first two palettes.
+                theme_key = (request.form.get('theme') or '').strip()
+                if theme_key in PROFILE_THEMES:
+                    allowed = set(list(PROFILE_THEMES)[:2]) \
+                        if current_user.tier == 'Free' else set(PROFILE_THEMES)
+                    if theme_key in allowed:
+                        current_user.theme = theme_key
+                    else:
+                        flash('That theme is available on paid tiers.',
+                              'warning')
+                # Contact form opt-out checkbox.
+                current_user.contact_disabled = bool(
+                    request.form.get('contact_disabled'))
                 avatar_url = (request.form.get('avatar_url') or '').strip()
                 if avatar_url:
                     current_user.avatar_url = avatar_url
@@ -333,6 +516,35 @@ def register_routes(app):
                 db.session.commit()
                 flash('Link order saved.', 'success')
 
+            elif form_action == 'link-edit':
+                # Edit per-link metadata (subhandle, cta, utm, category, pin)
+                link_id = request.form.get('link_id', type=int)
+                link = Link.query.filter_by(id=link_id,
+                                            user_id=current_user.id).first()
+                if link is None:
+                    abort(404)
+                subhandle = (request.form.get('subhandle') or '').strip().lstrip('@')[:80]
+                link.subhandle = subhandle or None
+                cta = (request.form.get('cta') or '').strip()[:40]
+                link.cta = cta or None
+                utm = (request.form.get('utm_params') or '').strip()[:300]
+                if utm and not utm.startswith('?utm_'):
+                    flash('UTM params must start with "?utm_" — not changed.',
+                          'warning')
+                else:
+                    link.utm_params = utm or None
+                cat = (request.form.get('category') or '').strip()[:40]
+                link.category = cat if cat in LINK_CATEGORIES else None
+                # Pinning is a paid-tier feature.
+                want_pin = bool(request.form.get('is_pinned'))
+                if want_pin and current_user.tier not in PAID_TIERS:
+                    flash('Pinning links is available on paid tiers.',
+                          'warning')
+                else:
+                    link.is_pinned = want_pin
+                db.session.commit()
+                flash('Link details saved.', 'success')
+
             return redirect(url_for('dashboard'))
 
         user_links = (Link.query.filter_by(user_id=current_user.id)
@@ -340,7 +552,10 @@ def register_routes(app):
         total_clicks = sum(link.click_count or 0 for link in user_links)
         return render_template('dashboard.html', links=user_links,
                                total_clicks=total_clicks,
-                               max_upload_kb=Setting.get_int('max_upload_size_kb', 2048))
+                               max_upload_kb=Setting.get_int('max_upload_size_kb', 2048),
+                               link_sources=LinkSource.active(),
+                               link_categories=LINK_CATEGORIES,
+                               themes=PROFILE_THEMES)
 
     @app.route('/link/add', methods=['POST'])
     @login_required
@@ -348,7 +563,6 @@ def register_routes(app):
         title = (request.form.get('title') or '').strip()
         url = (request.form.get('url') or '').strip()
         icon_code = request.form.get('icon_code') or 'link'
-
         if not title or not url:
             flash('Both a title and a URL are required.', 'danger')
             return redirect(url_for('dashboard'))
@@ -425,7 +639,31 @@ def register_routes(app):
         user = User.query.filter_by(username=username.lower()).first_or_404()
         active_links = (Link.query.filter_by(user_id=user.id, is_active=True)
                         .order_by(Link.position.asc()).all())
-        return render_template('profile.html', user=user, links=active_links)
+        # Adult-content gate: require a one-time age confirmation before
+        # any profile content is rendered to the visitor/session.
+        if user.is_adult_oriented and not session.get('age_ok'):
+            return render_template('profile_agegate.html', user=user)
+        pinned, categorized = group_links_for_profile(active_links)
+        # Contact form is enabled unless the user opted out; admins never
+        # get spammed by the demo profile either way.
+        show_contact = not user.contact_disabled
+        return render_template('profile.html', user=user, links=active_links,
+                               skills=normalize_skills(user.skills),
+                               video=video_embed(user),
+                               profile=theme_for_user(user),
+                               pinned_links=pinned,
+                               categorized_links=categorized,
+                               show_contact=show_contact)
+
+    @app.route('/u/<username>/confirm-age', methods=['POST'])
+    def confirm_age(username):
+        """Age confirmation for adult-oriented profiles (18+)."""
+        user = User.query.filter_by(username=username.lower()).first_or_404()
+        if not user.is_adult_oriented:
+            return redirect(url_for('public_profile', username=user.username))
+        if request.form.get('confirm') == 'yes':
+            session['age_ok'] = True
+        return redirect(url_for('public_profile', username=user.username))
 
     # Convenience alias so bare /<username> also works (kept last so it
     # never shadows the routes above).
@@ -683,6 +921,121 @@ def register_inbox_routes(app):
         db.session.commit()
         flash('Message restored to your inbox.', 'success')
         return redirect(request.referrer or url_for('inbox'))
+
+    # ---------------- Contact messages in the inbox --------------------
+
+    @app.route('/inbox/contact/<int:contact_id>', methods=['GET', 'POST'])
+    @login_required
+    def inbox_contact(contact_id):
+        """Open a visitor contact message (marks it read)."""
+        msg = ContactMessage.query.filter_by(id=contact_id,
+                                             recipient_id=current_user.id).first_or_404()
+        if not msg.is_read:
+            msg.is_read = True
+            db.session.commit()
+        return render_template('inbox_contact.html', msg=msg)
+
+    @app.route('/inbox/contact/archive/<int:contact_id>', methods=['POST'])
+    @login_required
+    def inbox_contact_archive(contact_id):
+        msg = ContactMessage.query.filter_by(id=contact_id,
+                                             recipient_id=current_user.id).first_or_404()
+        msg.is_archived = True
+        db.session.commit()
+        flash('Contact message archived.', 'info')
+        return redirect(request.referrer or url_for('inbox'))
+
+    @app.route('/inbox/contact/delete/<int:contact_id>', methods=['POST'])
+    @login_required
+    def inbox_contact_delete(contact_id):
+        msg = ContactMessage.query.filter_by(id=contact_id,
+                                             recipient_id=current_user.id).first_or_404()
+        db.session.delete(msg)
+        db.session.commit()
+        flash('Contact message deleted.', 'info')
+        return redirect(url_for('inbox'))
+
+
+# ==========================================
+# Public profile contact + abuse report routes
+# ==========================================
+
+CONTACT_EMAIL_RE = re.compile(r'^[^@\s]{1,60}@[^@\s.]+(\.[^@\s.]+)+$')
+
+
+def register_public_interaction_routes(app):
+
+    @app.route('/u/<username>/submit-contact', methods=['POST'])
+    def submit_contact(username):
+        """Profile 'Contact Me' modal -> recipient's inbox (unread)."""
+        user = User.query.filter_by(username=username.lower()).first_or_404()
+        # Honeypot: silently accept bots that filled the hidden field.
+        if request.form.get('website'):
+            return render_template('contact_thanks.html')
+        name = (request.form.get('name') or '').strip()[:80]
+        email = (request.form.get('email') or '').strip().lower()[:120]
+        subject = (request.form.get('subject') or '').strip()[:120]
+        body = (request.form.get('message') or '').strip()
+        if not name or not email or not body or len(body) > 5000:
+            flash('Please fill in your name, email, and a message '
+                  '(max 5000 characters).', 'danger')
+            return redirect(url_for('public_profile', username=user.username))
+        if not CONTACT_EMAIL_RE.match(email):
+            flash('That email address looks invalid.', 'danger')
+            return redirect(url_for('public_profile', username=user.username))
+        # Rate limit: max 3 contact messages per IP per hour.
+        ip = request.remote_addr
+        since = datetime.now() - timedelta(hours=1)
+        recent = (ContactMessage.query
+                  .filter(ContactMessage.sender_ip == ip,
+                          ContactMessage.created_at >= since)
+                  .count())
+        if recent >= 3:
+            flash('You have sent several messages recently. Please try '
+                  'again later.', 'warning')
+            return redirect(url_for('public_profile', username=user.username))
+        msg = ContactMessage(recipient_id=user.id, sender_name=name,
+                             sender_email=email, subject=subject or None,
+                             body=body, sender_ip=ip)
+        db.session.add(msg)
+        Activity.record('contact_received', user=user, detail=f'from {email}')
+        db.session.commit()
+        return render_template('contact_thanks.html')
+
+    @app.route('/report', methods=['GET'])
+    def report_abuse():
+        """Report Abuse landing page (list reasons / pick a profile)."""
+        target = (request.args.get('profile') or '').strip().lstrip('@')
+        return render_template('report.html', target=target,
+                               reasons=REPORT_REASONS)
+
+    @app.route('/report/<username>', methods=['GET'])
+    def report_abuse_profile(username):
+        user = User.query.filter_by(username=username.lower()).first_or_404()
+        return render_template('report.html', target=user.username,
+                               target_user=user, reasons=REPORT_REASONS)
+
+    @app.route('/report/submit', methods=['POST'])
+    def report_abuse_submit():
+        username = (request.form.get('target_username') or '').strip().lstrip('@')
+        target = User.query.filter_by(username=username.lower()).first()
+        reason = request.form.get('reason') or 'other'
+        details = (request.form.get('details') or '').strip()
+        if target is None or reason not in REPORT_REASONS or not details:
+            flash('Pick a profile, a reason, and describe the issue.', 'danger')
+            return redirect(url_for('report_abuse', profile=username))
+        link_id = request.form.get('link_id', type=int)
+        if link_id is not None:
+            link = Link.query.filter_by(id=link_id, user_id=target.id).first()
+            link_id = link.id if link else None
+        report = AbuseReport(
+            reporter_name=(request.form.get('reporter_name') or '').strip()[:80] or None,
+            reporter_email=(request.form.get('reporter_email') or '').strip().lower()[:120] or None,
+            target_user_id=target.id, target_link_id=link_id,
+            reason=reason, details=details[:5000])
+        db.session.add(report)
+        db.session.commit()
+        return render_template('report_thanks.html')
 
 
 # ==========================================
@@ -995,6 +1348,8 @@ def register_admin_routes(app):
 
     # Expose helpers to templates
     app.jinja_env.globals['is_impersonating'] = _is_impersonating
+    app.jinja_env.filters['skills_list'] = normalize_skills
+    app.jinja_env.globals['video_embed'] = video_embed
 
 
 # ==========================================
@@ -1281,6 +1636,10 @@ def register_seo_routes(app):
                  '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
                  ' xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">']
         for u in users:
+            # Adult-oriented profiles carry noindex — exclude them from
+            # sitemaps so crawlers aren't pointed at non-indexable URLs.
+            if getattr(u, 'is_adult_oriented', False):
+                continue
             lastmod = _iso_dt(getattr(u, 'updated_at', None) or u.created_at)
             canonical = f'{base}/u/{u.username}'
             links_feed = f'{base}/u/{u.username}/links.xml'
