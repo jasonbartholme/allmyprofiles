@@ -6,6 +6,7 @@ Import `db` from this module when creating tables / running migrations:
     from models import db, User, Link, Setting, Activity
 """
 
+import re
 from datetime import datetime
 
 from flask_sqlalchemy import SQLAlchemy
@@ -115,6 +116,15 @@ class User(UserMixin, db.Model):
     # Site administration flag
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
 
+    # Curated profile theme key (see app.PROFILE_THEMES). Users pick from a
+    # fixed palette; arbitrary colors are never accepted. 'Free' tier is
+    # restricted to the first two themes server-side.
+    theme = db.Column(db.String(20), nullable=True, default='light')
+    # Contact form: when True the public "Contact Me" button/modal is
+    # hidden for this profile.
+    contact_disabled = db.Column(db.Boolean, default=False, nullable=False,
+                                 server_default='0')
+
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
     # Relationships
@@ -128,10 +138,18 @@ class User(UserMixin, db.Model):
 
     @property
     def unread_messages(self):
-        """Count of unread, non-archived inbox messages for this user."""
-        return (MessageRead.query
-                .filter_by(user_id=self.id, is_read=False, is_archived=False)
-                .count())
+        """Count of unread, non-archived inbox items for this user.
+
+        Includes admin->user messages AND visitor contact messages so the
+        navbar badge reflects everything waiting in the inbox.
+        """
+        admin_unread = (MessageRead.query
+                        .filter_by(user_id=self.id, is_read=False,
+                                   is_archived=False)
+                        .count())
+        contact_unread = ContactMessage.query.filter_by(
+            recipient_id=self.id, is_read=False, is_archived=False).count()
+        return admin_unread + contact_unread
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -212,7 +230,190 @@ class Link(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     click_count = db.Column(db.Integer, default=0)
 
+    # Profile-redesign fields (Colab mockup). All optional with safe
+    # defaults so existing rows keep working after migration.
+    source_id = db.Column(db.Integer, db.ForeignKey('link_sources.id'),
+                          nullable=True)
+    category = db.Column(db.String(40), nullable=True)  # manual override
+    is_pinned = db.Column(db.Boolean, default=False, nullable=False,
+                          server_default='0')           # paid tiers only
+    utm_params = db.Column(db.String(300), nullable=True)
+    subhandle = db.Column(db.String(80), nullable=True)  # "@handle" line
+    cta = db.Column(db.String(40), nullable=True)        # "Follow", "Listen"
+
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+    @property
+    def matched_source(self):
+        """LinkSource whose domain matches this link's URL (or None)."""
+        if self.source_id:
+            src = db.session.get(LinkSource, self.source_id)
+            if src is not None:
+                return src
+        host = _url_host(self.url)
+        return LinkSource.for_host(host) if host else None
+
+    @property
+    def display_category(self):
+        src = self.matched_source
+        return self.category or (src.category if src else 'Other') \
+            or 'Other'
+
+    @property
+    def brand_bg(self):
+        src = self.matched_source
+        return src.bg_color if src else '#ffffff'
+
+    @property
+    def brand_text(self):
+        src = self.matched_source
+        return src.text_color if src else '#212529'
+
+    @property
+    def brand_border(self):
+        src = self.matched_source
+        return src.border_color if src else '#dee2e6'
+
+    @property
+    def brand_icon(self):
+        """Bootstrap-icons class for this link's card."""
+        src = self.matched_source
+        if self.icon_code and not src:
+            return f'bi bi-{self.icon_code}'
+        code = (src.icon_code if src and src.icon_code
+                else self.icon_code) or 'link-45deg'
+        return f'bi bi-{code}'
+
+    @property
+    def safe_utm(self):
+        """UTM string only if it looks like genuine UTM params."""
+        u = (self.utm_params or '').strip()
+        if u.startswith('?utm_') and len(u) <= 300 and '"' not in u \
+                and '<' not in u and ' ' not in u:
+            return u
+        return ''
+
+
+def _url_host(url):
+    from urllib.parse import urlparse
+    try:
+        p = urlparse(url if '://' in url else 'https://' + url)
+        h = (p.hostname or '').lower()
+        return h[4:] if h.startswith('www.') else h
+    except ValueError:
+        return None
+
+
+# ==========================================
+# Link Sources (admin-managed social networks)
+# ==========================================
+
+# Category order used by the profile tabs.
+LINK_CATEGORIES = ['Gaming & Dev', 'Content', 'Social', 'Store', 'Portfolio',
+                   'Music', 'Other']
+
+DEFAULT_LINK_SOURCES = [
+    # name, domains (comma-sep), bg, text, border, bootstrap icon, category
+    ('GitHub',    'github.com,gitlab.com',            '#24292e', '#ffffff', '#24292e', 'github',        'Gaming & Dev'),
+    ('Steam',     'store.steampowered.com,steamcommunity.com', '#1b2838', '#c7d5e0', '#171a21', 'steam', 'Gaming & Dev'),
+    ('Xbox Live', 'xbox.com,xboxlive.com',            '#107c10', '#ffffff', '#0b5a0b', 'controller',    'Gaming & Dev'),
+    ('PlayStation Network', 'playstation.com',        '#00439c', '#ffffff', '#002d6b', 'controller',    'Gaming & Dev'),
+    ('Discord',   'discord.gg,discord.com',           '#5865f2', '#ffffff', '#4752c4', 'discord',       'Social'),
+    ('YouTube',   'youtube.com,youtu.be',             '#ff0000', '#ffffff', '#cc0000', 'youtube',       'Content'),
+    ('Twitch',    'twitch.tv',                        '#9146ff', '#ffffff', '#772ce8', 'twitch',        'Content'),
+    ('Vimeo',     'vimeo.com',                        '#1ab7ea', '#ffffff', '#1494bd', 'vimeo',         'Content'),
+    ('Medium',    'medium.com',                       '#12100e', '#ffffff', '#000000', 'medium',        'Content'),
+    ('Substack',  'substack.com',                     '#ff6719', '#ffffff', '#d95511', 'envelope-paper','#Content'),
+    ('Spotify',   'spotify.com',                      '#1db954', '#0b2a14', '#169c46', 'spotify',       'Music'),
+    ('Apple Music','music.apple.com',                 '#fa243c', '#ffffff', '#c91e31', 'apple-music',   'Music'),
+    ('SoundCloud','soundcloud.com',                   '#ff5500', '#ffffff', '#d64800', 'cloud-fill',    'Music'),
+    ('Bandcamp',  'bandcamp.com',                     '#629aa9', '#ffffff', '#4f7d87', 'music-note-beamed', 'Music'),
+    ('X / Twitter','twitter.com,x.com',               '#000000', '#ffffff', '#333333', 'twitter-x',     'Social'),
+    ('LinkedIn',  'linkedin.com',                     '#0a66c2', '#ffffff', '#085299', 'linkedin',      'Social'),
+    ('Reddit',    'reddit.com',                       '#ff4500', '#ffffff', '#d63a00', 'reddit',        'Social'),
+    ('Quora',     'quora.com',                        '#b92b27', '#ffffff', '#97231f', 'question-circle', 'Social'),
+    ('Facebook',  'facebook.com',                     '#1877f2', '#ffffff', '#125ecc', 'facebook',      'Social'),
+    ('Instagram', 'instagram.com',                    '#c13584', '#ffffff', '#9a2a69', 'instagram',     'Social'),
+    ('TikTok',    'tiktok.com',                       '#010101', '#ffffff', '#25f4ee', 'camera-reels',  'Social'),
+    ('Threads',   'threads.net',                      '#000000', '#ffffff', '#333333', 'at',            'Social'),
+    ('Patreon',   'patreon.com',                      '#f96854', '#ffffff', '#c94f3f', 'heart-fill',    'Store'),
+    ('Ko-fi',     'ko-fi.com',                        '#ff5e5b', '#ffffff', '#d94c49', 'cup-hot',       'Store'),
+    ('Buy Me a Coffee', 'buymeacoffee.com',           '#ffd43b', '#2b2b2b', '#e0b92f', 'cash-coin',     'Store'),
+    ('Etsy',      'etsy.com',                         '#f16521', '#ffffff', '#c95119', 'shop',          'Store'),
+    ('Amazon Storefront', 'amazon.com,amzn.to',       '#ff9900', '#131921', '#e08700', 'bag',           'Store'),
+    ('Personal Website', '',                            '#f8f9fa', '#212529', '#dee2e6', 'globe2',      'Portfolio'),
+]
+
+
+class LinkSource(db.Model):
+    """Admin-managed catalogue of social/link platforms.
+
+    Each source carries the platform's brand colors so profile link cards
+    can be styled to match the origin site while keeping contrast readable
+    (bg/text pairs are curated by the admin, never free-form user input).
+    """
+    __tablename__ = 'link_sources'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    domains = db.Column(db.String(300), nullable=True)  # comma-separated
+    bg_color = db.Column(db.String(9), default='#ffffff', nullable=False)
+    text_color = db.Column(db.String(9), default='#212529', nullable=False)
+    border_color = db.Column(db.String(9), default='#dee2e6', nullable=False)
+    icon_code = db.Column(db.String(50), default='link-45deg')  # bi-* slug
+    custom_icon_path = db.Column(db.String(300), nullable=True)  # uploads/…
+    category = db.Column(db.String(40), default='Other', nullable=False)
+    sort_order = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+    HEX_RE = None  # set below (avoids shadowing confusion in class body)
+
+    def __repr__(self):
+        return f'<LinkSource {self.name}>'
+
+    @classmethod
+    def active(cls):
+        return (cls.query.filter_by(is_active=True)
+                .order_by(cls.sort_order, cls.name).all())
+
+    @classmethod
+    def domain_map(cls):
+        """{'github.com': <LinkSource>, ...} for all active sources."""
+        out = {}
+        for src in cls.active():
+            for d in (src.domains or '').split(','):
+                d = d.strip().lower()
+                if d:
+                    out.setdefault(d, src)
+        return out
+
+    @classmethod
+    def for_host(cls, host):
+        if not host:
+            return None
+        dm = cls.domain_map()
+        parts = host.split('.')
+        for i in range(len(parts) - 1):
+            candidate = '.'.join(parts[i:])
+            if candidate in dm:
+                return dm[candidate]
+        return None
+
+    @classmethod
+    def seed_defaults(cls):
+        """Populate the catalogue on first run (idempotent)."""
+        if cls.query.first() is not None:
+            return
+        for idx, (name, domains, bg, txt, brd, icon, cat) in enumerate(DEFAULT_LINK_SOURCES):
+            db.session.add(cls(name=name, domains=domains, bg_color=bg,
+                               text_color=txt, border_color=brd,
+                               icon_code=icon, category=cat,
+                               sort_order=idx))
+        db.session.commit()
+
+
+HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+LinkSource.HEX_RE = HEX_COLOR_RE
 
 
 # ==========================================
@@ -339,3 +540,92 @@ class LinkCheckResult(db.Model):
     last_notified_at = db.Column(db.DateTime, nullable=True)
 
     link = db.relationship('Link')
+
+
+# ==========================================
+# Public contact messages (profile "Contact Me" form -> user inbox)
+# ==========================================
+
+class ContactMessage(db.Model):
+    """A message a visitor sent from someone's public profile page.
+
+    Delivered into the *recipient user's* inbox as an unread item with a
+    category and severity, mirroring the admin-message UX. Includes abuse
+    safeguards: honeypot field, rate limiting by IP, and length caps.
+    """
+    __tablename__ = 'contact_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    recipient_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                             nullable=False, index=True)
+    sender_name = db.Column(db.String(80), nullable=False)
+    sender_email = db.Column(db.String(120), nullable=False)
+    subject = db.Column(db.String(120), nullable=True)
+    body = db.Column(db.Text, nullable=False)
+    # Spam/abuse metadata
+    sender_ip = db.Column(db.String(45), nullable=True)
+    is_spam = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(),
+                           index=True)
+    # Delivery status inside the recipient's inbox
+    is_read = db.Column(db.Boolean, default=False, nullable=False)
+    is_archived = db.Column(db.Boolean, default=False, nullable=False)
+
+    recipient = db.relationship('User', foreign_keys=[recipient_id])
+
+    @property
+    def preview(self):
+        text = (self.body or '').strip().replace('\n', ' ')
+        return text[:90] + ('…' if len(text) > 90 else '')
+
+
+# ==========================================
+# Abuse reports (public "Report Abuse" -> admin console section)
+# ==========================================
+
+REPORT_REASONS = {
+    'adult_unmarked': 'Adult content not marked 18+',
+    'spam_scam':      'Spam, scam, or fraud',
+    'harassment':     'Harassment or hate speech',
+    'copyright':      'Copyright / trademark violation',
+    'malware':        'Malware or phishing links',
+    'impersonation':  'Impersonation',
+    'other':          'Something else',
+}
+
+REPORT_STATUSES = ['open', 'reviewing', 'resolved', 'dismissed']
+
+
+class AbuseReport(db.Model):
+    """Public abuse report about a profile or one of its links.
+
+    Surfaces in the admin console (like the messaging system) rather than
+    email so it scales to many reports/day. Admin can set a status and an
+    internal note.
+    """
+    __tablename__ = 'abuse_reports'
+
+    id = db.Column(db.Integer, primary_key=True)
+    reporter_name = db.Column(db.String(80), nullable=True)   # optional
+    reporter_email = db.Column(db.String(120), nullable=True)  # optional
+    target_user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                               nullable=False, index=True)
+    target_link_id = db.Column(db.Integer, db.ForeignKey('links.id'),
+                               nullable=True)
+    reason = db.Column(db.String(30), nullable=False)         # REPORT_REASONS key
+    details = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), default='open', nullable=False,
+                       index=True)                            # REPORT_STATUSES
+    admin_note = db.Column(db.Text, nullable=True)
+    resolved_by_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                               nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(),
+                           index=True)
+    updated_at = db.Column(db.DateTime, nullable=True)
+
+    target_user = db.relationship('User', foreign_keys=[target_user_id])
+    resolved_by = db.relationship('User', foreign_keys=[resolved_by_id])
+
+    @property
+    def reason_label(self):
+        return REPORT_REASONS.get(self.reason, self.reason)
