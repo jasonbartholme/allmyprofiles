@@ -224,6 +224,59 @@ def group_links_for_profile(links):
     return pinned, ordered
 
 
+def _ensure_schema(db):
+    """Dev-only lightweight schema sync.
+
+    ``db.create_all()`` creates *missing tables* but never adds new columns to
+    existing ones, so a dev database created before recent model changes (e.g.
+    missing ``users.skills``) keeps throwing OperationalError. This helper also
+    issues ``ALTER TABLE ... ADD COLUMN`` for any simple nullable columns that
+    are missing from an existing table. It is intentionally NOT a replacement
+    for Flask-Migrate in production — run ``flask db upgrade`` there.
+    """
+    import sqlalchemy as sa
+    db.create_all()
+    inspector = sa.inspect(db.engine)
+    existing_tables = set(inspector.get_table_names())
+    for table in db.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue  # just created by create_all()
+        have = {c['name'] for c in inspector.get_columns(table.name)}
+        for col in table.columns:
+            if col.name in have or col.primary_key:
+                continue  # only auto-add safe, non-PK columns
+            try:
+                coltype = col.type.compile(db.engine.dialect)
+            except Exception:
+                continue
+            default_sql = ''
+            if not col.nullable:
+                # Non-nullable columns need a server default so existing rows
+                # can be backfilled by ALTER TABLE.
+                if col.default is not None and getattr(col.default, 'is_scalar', False):
+                    v = col.default.arg
+                    if isinstance(v, bool):
+                        default_sql = f" DEFAULT {int(v)}"
+                    elif isinstance(v, (int, float)):
+                        default_sql = f" DEFAULT {v}"
+                    elif isinstance(v, str):
+                        default_sql = " DEFAULT '" + v.replace("'", "''") + "'"
+                    else:
+                        continue  # callable/python-side default — skip safely
+                else:
+                    tname = coltype.upper()
+                    if any(t in tname for t in ('INT', 'BOOL')):
+                        default_sql = ' DEFAULT 0'
+                    elif 'CHAR' in tname or 'TEXT' in tname:
+                        default_sql = " DEFAULT ''"
+                    else:
+                        continue  # can't safely backfill this column type
+            with db.engine.begin() as conn:
+                conn.execute(sa.text(
+                    f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {coltype}{default_sql}'
+                ))
+
+
 def create_app(config_name=None):
     """Application factory.
 
@@ -243,14 +296,16 @@ def create_app(config_name=None):
 
     # Initialize extensions
     db.init_app(app)
-    migrate = Migrate(app, db)  # noqa: F841  (enables `flask db` commands)
+    # render_as_batch=True makes Alembic use SQLite "batch" mode (table
+    # rebuild) for ALTERs, which SQLite needs; it's harmless on PostgreSQL.
+    migrate = Migrate(app, db, render_as_batch=True)
     login_manager.init_app(app)
 
     # When running under the plain dev server, make sure tables + default
     # settings exist. In production use `flask db upgrade` instead.
-    if config_name == 'development':
+    if config_name == 'development' and not os.environ.get('SKIP_AUTO_SCHEMA'):
         with app.app_context():
-            db.create_all()
+            _ensure_schema(db)
             Setting.seed_defaults()
 
     register_routes(app)
