@@ -31,6 +31,10 @@ class Setting(db.Model):
     """Simple key/value store for admin-editable site settings."""
     __tablename__ = 'settings'
 
+    # Module-level defaults exposed as a class attribute so callers can use
+    # Setting.DEFAULT_SETTINGS (see app.py admin_settings route).
+    DEFAULT_SETTINGS = DEFAULT_SETTINGS
+
     key = db.Column(db.String(64), primary_key=True)
     value = db.Column(db.String(500), nullable=False, default='')
 
