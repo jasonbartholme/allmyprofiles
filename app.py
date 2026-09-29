@@ -307,6 +307,7 @@ def create_app(config_name=None):
         with app.app_context():
             _ensure_schema(db)
             Setting.seed_defaults()
+            LinkSource.seed_defaults()
 
     register_routes(app)
     register_static_pages(app)
@@ -314,6 +315,7 @@ def create_app(config_name=None):
     register_inbox_routes(app)
     register_admin_routes(app)
     register_admin_message_routes(app)
+    register_link_source_routes(app)
     register_error_handlers(app)
     register_template_context(app)
 
@@ -644,6 +646,33 @@ def register_routes(app):
             icon_code=icon_code,
             position=position,
         )
+        # Explicit source selection from the admin-managed catalogue; falls
+        # back to automatic domain matching (Link.matched_source) otherwise.
+        source_id = request.form.get('source_id')
+        if source_id:
+            src = db.session.get(LinkSource, int(source_id or 0)) \
+                if source_id.isdigit() else None
+            if src is not None and not src.is_deleted:
+                new_link.source_id = src.id
+                if not icon_code or icon_code == 'link':
+                    new_link.icon_code = src.icon_code or 'link-45deg'
+                new_link.category = src.category
+                if src.cta and not request.form.get('cta'):
+                    new_link.cta = src.cta
+        cta = (request.form.get('cta') or '').strip()[:40]
+        if cta:
+            new_link.cta = cta
+        subhandle = (request.form.get('subhandle') or '').strip().lstrip('@')[:80]
+        if subhandle:
+            new_link.subhandle = subhandle
+        utm = (request.form.get('utm_params') or '').strip()
+        if utm:
+            if utm.startswith('?utm_') and len(utm) <= 300:
+                new_link.utm_params = utm
+            else:
+                flash('UTM params ignored — must start with "?utm_" '
+                      '(tracking still works via our own click counter).',
+                      'warning')
         db.session.add(new_link)
         db.session.commit()
 
@@ -1517,6 +1546,215 @@ def register_admin_message_routes(app):
         db.session.commit()
         flash('Message recalled and removed from all inboxes.', 'info')
         return redirect(url_for('admin_messages'))
+
+
+# ==========================================
+# Admin Link Source CRUD (social platform catalogue)
+# ==========================================
+
+def register_link_source_routes(app):
+
+    def _validate_source_form(form, source_id=None):
+        """Validate admin link-source fields. Returns (errors, cleaned)."""
+        errors = []
+        name = (form.get('name') or '').strip()
+        if not name or len(name) > 80:
+            errors.append('Name is required (max 80 characters).')
+        dup = LinkSource.query.filter(LinkSource.name == name)
+        if source_id is not None:
+            dup = dup.filter(LinkSource.id != source_id)
+        if dup.first():
+            errors.append(f'A source named "{name}" already exists.')
+
+        domains = (form.get('domains') or '').strip().lower()
+        # basic sanity: comma-separated bare hostnames, no scheme/spaces
+        for d in [x.strip() for x in domains.split(',') if x.strip()]:
+            if any(c in d for c in (' ', '/', ':', '@')):
+                errors.append(f'Domain "{d}" must be a bare hostname '
+                              f'(e.g. github.com), no http:// or spaces.')
+
+        url = (form.get('url') or '').strip()
+        if url and not url.startswith(('http://', 'https://')):
+            errors.append('Example URL must start with http:// or https://.')
+
+        pattern = (form.get('profile_pattern') or '').strip()
+        if pattern:
+            if '{handle}' not in pattern:
+                errors.append('Profile pattern must contain the {handle} '
+                              'placeholder (e.g. https://github.com/{handle}).')
+            if not pattern.startswith(('http://', 'https://')):
+                errors.append('Profile pattern must start with http:// or '
+                              'https://.')
+
+        colors = {}
+        for field, label in (('bg_color', 'Background'), ('text_color', 'Text'),
+                             ('border_color', 'Border')):
+            value = (form.get(field) or '').strip().lower()
+            if not HEX_COLOR_RE.match(value or ''):
+                errors.append(f'{label} color must be a hex value like '
+                              f'#ff0000.')
+                value = value or '#ffffff'
+            colors[field] = value
+
+        icon_code = (form.get('icon_code') or '').strip() or 'link-45deg'
+        category = (form.get('category') or '').strip() or 'Other'
+        cta = (form.get('cta') or '').strip()[:40]
+        try:
+            sort_order = int(form.get('sort_order') or 0)
+        except ValueError:
+            sort_order = 0
+
+        cleaned = {
+            'name': name, 'domains': domains, 'url': url,
+            'profile_pattern': pattern, 'icon_code': icon_code,
+            'category': category, 'cta': cta, 'sort_order': sort_order,
+            'is_active': form.get('is_active') == 'on',
+            'is_adult': form.get('is_adult') == 'on',
+            'is_nofollow': form.get('is_nofollow') == 'on',
+            **colors,
+        }
+        return errors, cleaned
+
+    @app.route('/admin/link-sources')
+    @admin_required
+    def admin_link_sources():
+        """Catalogue list with per-source usage report (distinct users)."""
+        sources = LinkSource.query.filter_by(is_deleted=False) \
+            .order_by(LinkSource.sort_order, LinkSource.name).all()
+        # Usage report: total users + total links referencing each source.
+        user_counts = dict(
+            db.session.query(Link.source_id, func.count(func.distinct(Link.user_id)))
+            .filter(Link.source_id.isnot(None))
+            .group_by(Link.source_id).all())
+        link_counts = dict(
+            db.session.query(Link.source_id, func.count(Link.id))
+            .filter(Link.source_id.isnot(None))
+            .group_by(Link.source_id).all())
+        rows = [{'src': s,
+                 'users': user_counts.get(s.id, 0),
+                 'links': link_counts.get(s.id, 0)} for s in sources]
+        deleted = LinkSource.query.filter_by(is_deleted=True) \
+            .order_by(LinkSource.name).all()
+        return render_template('admin/link_sources.html', rows=rows,
+                               deleted=deleted,
+                               categories=LINK_CATEGORIES)
+
+    @app.route('/admin/link-sources/new', methods=['GET', 'POST'])
+    @admin_required
+    def admin_link_source_new():
+        if request.method == 'POST':
+            errors, data = _validate_source_form(request.form)
+            icon_file = request.files.get('custom_icon')
+            if icon_file and icon_file.filename:
+                rel, err = save_upload_image(icon_file, app.config,
+                                             subdir='icons')
+                if err:
+                    errors.append(f'Custom icon: {err}')
+                else:
+                    data['custom_icon_path'] = rel
+            if errors:
+                for e in errors:
+                    flash(e, 'danger')
+                return render_template('admin/link_source_form.html',
+                                       src=None, form=request.form,
+                                       categories=LINK_CATEGORIES)
+            src = LinkSource(**data)
+            db.session.add(src)
+            Activity.record('link_source_created', actor=_real_admin(),
+                            detail=f'created link source "{src.name}"')
+            db.session.commit()
+            flash(f'Link source "{src.name}" created. It is live for users.',
+                  'success')
+            return redirect(url_for('admin_link_sources'))
+        return render_template('admin/link_source_form.html', src=None,
+                               form=None, categories=LINK_CATEGORIES)
+
+    @app.route('/admin/link-sources/<int:source_id>/edit',
+               methods=['GET', 'POST'])
+    @admin_required
+    def admin_link_source_edit(source_id):
+        src = db.session.get(LinkSource, source_id)
+        if src is None or src.is_deleted:
+            abort(404)
+        if request.method == 'POST':
+            errors, data = _validate_source_form(request.form,
+                                                 source_id=source_id)
+            icon_file = request.files.get('custom_icon')
+            if icon_file and icon_file.filename:
+                rel, err = save_upload_image(icon_file, app.config,
+                                             subdir='icons')
+                if err:
+                    errors.append(f'Custom icon: {err}')
+                else:
+                    if src.custom_icon_path:
+                        delete_upload_image(src.custom_icon_path,
+                                            app.config)
+                    data['custom_icon_path'] = rel
+            elif request.form.get('remove_icon') == 'on':
+                if src.custom_icon_path:
+                    delete_upload_image(src.custom_icon_path, app.config)
+                data['custom_icon_path'] = None
+            else:
+                data['custom_icon_path'] = src.custom_icon_path
+            if errors:
+                for e in errors:
+                    flash(e, 'danger')
+                return render_template('admin/link_source_form.html',
+                                       src=src, form=request.form,
+                                       categories=LINK_CATEGORIES)
+            for key, value in data.items():
+                setattr(src, key, value)
+            src.updated_at = datetime.now()
+            Activity.record('link_source_updated', actor=_real_admin(),
+                            detail=f'updated link source "{src.name}"')
+            db.session.commit()
+            flash(f'Link source "{src.name}" updated. Changes are live.',
+                  'success')
+            return redirect(url_for('admin_link_sources'))
+        return render_template('admin/link_source_form.html', src=src,
+                               form=None, categories=LINK_CATEGORIES)
+
+    @app.route('/admin/link-sources/<int:source_id>/delete',
+               methods=['POST'])
+    @admin_required
+    def admin_link_source_delete(source_id):
+        """Soft delete: existing user links keep working via their saved URL;
+        the source just disappears from pickers/suggestions."""
+        src = db.session.get(LinkSource, source_id)
+        if src is None or src.is_deleted:
+            abort(404)
+        src.is_deleted = True
+        src.is_active = False
+        src.updated_at = datetime.now()
+        Activity.record('link_source_deleted', actor=_real_admin(),
+                        detail=f'deleted link source "{src.name}"')
+        db.session.commit()
+        flash(f'Link source "{src.name}" deleted (recoverable below).',
+              'info')
+        return redirect(url_for('admin_link_sources'))
+
+    @app.route('/admin/link-sources/<int:source_id>/restore',
+               methods=['POST'])
+    @admin_required
+    def admin_link_source_restore(source_id):
+        src = db.session.get(LinkSource, source_id)
+        if src is None or not src.is_deleted:
+            abort(404)
+        # If another source took the unique name meanwhile, ask admin first.
+        clash = LinkSource.query.filter_by(name=src.name,
+                                           is_deleted=False).first()
+        if clash:
+            flash(f'Cannot restore "{src.name}": an active source with that '
+                  f'name exists. Delete it first or rename before restoring.',
+                  'danger')
+            return redirect(url_for('admin_link_sources'))
+        src.is_deleted = False
+        src.updated_at = datetime.now()
+        Activity.record('link_source_restored', actor=_real_admin(),
+                        detail=f'restored link source "{src.name}"')
+        db.session.commit()
+        flash(f'Link source "{src.name}" restored.', 'success')
+        return redirect(url_for('admin_link_sources'))
 
 
 # ==========================================

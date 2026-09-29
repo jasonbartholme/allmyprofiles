@@ -6,6 +6,8 @@
     <i class="bi bi-people me-1"></i>Users</a></li>
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='messages' }}" href="{{ url_for('admin_messages') }}">
     <i class="bi bi-envelope-paper me-1"></i>Messages</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if active=='link-sources' }}" href="{{ url_for('admin_link_sources') }}">
+    <i class="bi bi-share-fill me-1"></i>Link Sources</a></li>
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='settings' }}" href="{{ url_for('admin_settings') }}">
     <i class="bi bi-gear me-1"></i>Site settings</a></li>
 </ul>

@@ -1,1 +1,24 @@
-(empty)
+# Python
+__pycache__/
+*.pyc
+
+# Local databases & instance data
+instance/
+*.db
+
+# User uploads (avatars, custom icons) — keep folders, ignore contents
+uploads/*
+!uploads/.gitkeep
+!uploads/avatars/.gitkeep
+!uploads/icons/.gitkeep
+
+# Environment / secrets
+.env
+venv/
+.venv/
+
+# Mockups (local design references)
+mockups/
+
+# OS
+.DS_Store

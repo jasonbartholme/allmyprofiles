@@ -1,0 +1,146 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}{{ 'Edit' if src else 'New' }} Link Source — Admin{% endblock %}
+
+{% macro field(name, label, value='', type='text', help='', maxlength=300, required=false) %}
+<div class="col-12">
+  <label class="form-label fw-semibold" for="{{ name }}">{{ label }}</label>
+  <input class="form-control" id="{{ name }}" name="{{ name }}" type="{{ type }}"
+         value="{{ form.get(name) if form else (value or '') }}"
+         {% if maxlength %}maxlength="{{ maxlength }}"{% endif %}
+         {% if required %}required{% endif %}>
+  {% if help %}<div class="form-text">{{ help }}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 860px">
+  <h2 class="fw-bold mb-3">
+    <i class="bi bi-share-fill text-primary me-2"></i>{{ 'Edit link source' if src else 'New link source' }}
+  </h2>
+  {{ dash.nav('link-sources') }}
+
+  <div class="card p-4">
+    <form method="POST" enctype="multipart/form-data">
+      <div class="row g-3">
+        {{ field('name', 'Name *', value=src.name if src else '', maxlength=80, required=true,
+                 help='Display name shown to users, e.g. "GitHub". Must be unique.') }}
+
+        {{ field('domains', 'Domains', value=src.domains if src else '',
+                 help='Comma-separated bare hostnames used for auto-matching pasted URLs, e.g. github.com,gist.github.com') }}
+
+        {{ field('url', 'Example URL', value=src.url if src else '',
+                 help='Placeholder/example shown in the user picker, e.g. https://github.com/yourusername') }}
+
+        {{ field('profile_pattern', 'Profile pattern', value=src.profile_pattern if src else '',
+                 help='Template with {handle}, e.g. https://github.com/{handle} — lets users just type their username') }}
+
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold" for="category">Category</label>
+          <select class="form-select" id="category" name="category">
+            {% for c in categories %}
+            <option value="{{ c }}"
+              {% if (form and form.get('category') == c) or (not form and src and src.category == c) %}selected{% endif %}>
+              {{ c }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Drives the tab grouping on public profile pages.</div>
+        </div>
+
+        {{ field('cta', 'Button label (CTA)', value=src.cta if src else '', maxlength=40,
+                 help='e.g. Follow, Subscribe, View Repo. Defaults to "Visit" when blank.') }}
+
+        {{ field('icon_code', 'Bootstrap icon code', value=src.icon_code if src else '',
+                 help='Slug from icons.getbootstrap.com without the "bi-" prefix, e.g. github, youtube. Used unless a custom icon is uploaded.') }}
+
+        <div class="col-12">
+          <label class="form-label fw-semibold" for="custom_icon">Custom icon (if not in Bootstrap Icons)</label>
+          {% if src and src.custom_icon_path %}
+          <div class="mb-2 d-flex align-items-center gap-2">
+            <img src="/uploads/{{ src.custom_icon_path }}" alt="current icon"
+                 style="width:32px;height:32px;object-fit:contain;background:#f8f9fa;border-radius:6px;padding:2px;">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="remove_icon" name="remove_icon">
+              <label class="form-check-label" for="remove_icon">Remove current custom icon</label>
+            </div>
+          </div>
+          {% endif %}
+          <input class="form-control" type="file" id="custom_icon" name="custom_icon" accept="image/png,image/webp,image/jpeg,image/gif">
+          <div class="form-text">Upload a single-color PNG/WebP (≤512px). Re-encoded server-side; stored in gitignored uploads/icons/.</div>
+        </div>
+
+        <div class="col-12"><hr class="my-2"><span class="fw-semibold">Brand colors</span>
+          <span class="text-muted small"> — hex values; keep bg/text pairs readable (this is why users can't free-style colors).</span></div>
+
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold" for="bg_color">Background *</label>
+          <div class="input-group">
+            <input class="form-control" id="bg_color" name="bg_color"
+                   value="{{ form.get('bg_color') if form else (src.bg_color if src else '#ffffff') }}"
+                   pattern="#[0-9a-fA-F]{6}" required>
+            <input class="form-control border-start-0" type="color" style="max-width:56px"
+                   oninput="document.getElementById('bg_color').value=this.value">
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold" for="text_color">Text *</label>
+          <div class="input-group">
+            <input class="form-control" id="text_color" name="text_color"
+                   value="{{ form.get('text_color') if form else (src.text_color if src else '#212529') }}"
+                   pattern="#[0-9a-fA-F]{6}" required>
+            <input class="form-control border-start-0" type="color" style="max-width:56px"
+                   oninput="document.getElementById('text_color').value=this.value">
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold" for="border_color">Border *</label>
+          <div class="input-group">
+            <input class="form-control" id="border_color" name="border_color"
+                   value="{{ form.get('border_color') if form else (src.border_color if src else '#dee2e6') }}"
+                   pattern="#[0-9a-fA-F]{6}" required>
+            <input class="form-control border-start-0" type="color" style="max-width:56px"
+                   oninput="document.getElementById('border_color').value=this.value">
+          </div>
+        </div>
+
+        <div class="col-sm-4">
+          {{ field('sort_order', 'Sort order', type='number', value=src.sort_order if src else 0,
+                   help='Lower numbers appear first in pickers/profiles.') }}
+        </div>
+
+        <div class="col-sm-4 d-flex align-items-end">
+          <div class="form-check form-switch mb-2 me-3">
+            <input class="form-check-input" type="checkbox" role="switch" id="is_active" name="is_active"
+                   {% if (form and form.get('is_active')) or (not form and (src.is_active if src else true)) %}checked{% endif %}>
+            <label class="form-check-label" for="is_active">Active (visible to users)</label>
+          </div>
+        </div>
+        <div class="col-sm-4 d-flex align-items-end">
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="is_adult" name="is_adult"
+                   {% if (form and form.get('is_adult')) or (src and src.is_adult) %}checked{% endif %}>
+            <label class="form-check-label" for="is_adult">Adults only (18+)</label>
+          </div>
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="is_nofollow" name="is_nofollow"
+                   {% if (form and form.get('is_nofollow')) or (src and src.is_nofollow) %}checked{% endif %}>
+            <label class="form-check-label" for="is_nofollow">Add rel="nofollow" to links from this source</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary rounded-pill px-4">
+          {{ 'Save changes' if src else 'Create source' }}</button>
+        <a href="{{ url_for('admin_link_sources') }}" class="btn btn-outline-secondary rounded-pill px-4">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <p class="text-muted small mt-3">
+    Changes go live for all users immediately — no publish step needed.
+    Deleting a source never breaks existing profile links (they keep their
+    saved URL); it only removes it from future selection.
+  </p>
+</div>
+{% endblock %}
