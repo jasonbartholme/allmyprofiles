@@ -75,16 +75,41 @@
             <div class="col-sm-7">
               <input type="url" class="form-control" name="url" placeholder="https://…" required>
             </div>
-            <div class="col-sm-8">
-              <select class="form-select" name="icon_code">
-                {% set icons = ['link-45deg','globe','instagram','twitter-x','youtube','github','linkedin','facebook','tiktok','twitch','whatsapp','telegram','shop','camera-fill','mic-fill','briefcase','envelope','music-note-beamed','play-btn'] %}
-                {% for icon in icons %}
-                <option value="{{ icon }}"><i></i> {{ icon }}</option>
+            <div class="col-sm-6">
+              <select class="form-select" name="source_id">
+                <option value="">Source: auto-detect from URL</option>
+                {% for s in link_sources %}
+                <option value="{{ s.id }}">{{ s.name }}{% if s.is_adult %} (18+){% endif %}</option>
                 {% endfor %}
               </select>
+              <div class="form-text">Pick a platform to apply its brand colors &amp; icon, or leave on auto-detect.</div>
             </div>
-            <div class="col-sm-4 d-grid">
+            <div class="col-sm-3">
+              <input type="text" class="form-control" name="subhandle" placeholder="@handle (optional)" maxlength="80">
+            </div>
+            <div class="col-sm-3 d-grid">
               <button type="submit" class="btn btn-primary rounded-pill">Add link</button>
+            </div>
+            <div class="col-12">
+              <details>
+                <summary class="text-muted small">Advanced (icon override, button label, UTM params)</summary>
+                <div class="row g-2 mt-1">
+                  <div class="col-sm-4">
+                    <select class="form-select form-select-sm" name="icon_code">
+                      {% set icons = ['link-45deg','globe','instagram','twitter-x','youtube','github','linkedin','facebook','tiktok','twitch','whatsapp','telegram','shop','camera-fill','mic-fill','briefcase','envelope','music-note-beamed','play-btn'] %}
+                      {% for icon in icons %}
+                      <option value="{{ icon }}" {{ 'selected' if icon == 'link-45deg' }}>{{ icon }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-3">
+                    <input type="text" class="form-control form-control-sm" name="cta" placeholder="Button label (e.g. Follow)" maxlength="40">
+                  </div>
+                  <div class="col-sm-5">
+                    <input type="text" class="form-control form-control-sm" name="utm_params" placeholder="?utm_source=… (optional)" maxlength="300">
+                  </div>
+                </div>
+              </details>
             </div>
           </div>
         </form>

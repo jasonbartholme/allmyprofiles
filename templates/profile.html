@@ -98,11 +98,21 @@
 
     <div class="d-grid gap-3 mt-4">
       {% for link in links %}
+        {% set src = link.matched_source %}
         <a class="profile-link" href="{{ url_for('redirect_link', link_id=link.id) }}"
-           target="_blank" rel="noopener me">
-          <i class="bi bi-{{ link.icon_code or 'link-45deg' }} bi-2x text-primary"></i>
-          <span class="flex-grow-1 text-start">{{ link.title }}</span>
-          <i class="bi bi-box-arrow-up-right text-muted"></i>
+           target="_blank" rel="noopener me{{ ' nofollow' if src and src.is_nofollow else ''}}"
+           {% if src %}style="background:{{ src.bg_color }};color:{{ src.text_color }};border:2px solid {{ src.border_color }};"{% endif %}>
+          {% if src and src.custom_icon_path %}
+          <img src="/uploads/{{ src.custom_icon_path }}" alt="" style="width:28px;height:28px;object-fit:contain;">
+          {% else %}
+          <i class="bi bi-{{ (src.icon_code if src and src.icon_code else link.icon_code) or 'link-45deg' }} bi-2x {{ 'text-primary' if not src }}"></i>
+          {% endif %}
+          <span class="flex-grow-1 text-start">
+            {{ link.title }}
+            {% if link.subhandle %}<small style="opacity:.75;display:block;">@{{ link.subhandle }}</small>{% endif %}
+          </span>
+          <strong>{{ link.cta or (src.cta if src and src.cta else '') }}</strong>
+          <i class="bi bi-box-arrow-up-right"></i>
         </a>
       {% else %}
         <p class="text-muted">No links yet — check back soon!</p>

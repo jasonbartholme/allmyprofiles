@@ -357,14 +357,28 @@ class LinkSource(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), unique=True, nullable=False)
     domains = db.Column(db.String(300), nullable=True)  # comma-separated
+    url = db.Column(db.String(300), nullable=True)      # example/default URL
+    profile_pattern = db.Column(db.String(300), nullable=True)  # {handle} tmpl
     bg_color = db.Column(db.String(9), default='#ffffff', nullable=False)
     text_color = db.Column(db.String(9), default='#212529', nullable=False)
     border_color = db.Column(db.String(9), default='#dee2e6', nullable=False)
     icon_code = db.Column(db.String(50), default='link-45deg')  # bi-* slug
     custom_icon_path = db.Column(db.String(300), nullable=True)  # uploads/…
+    # When True, profile link anchors for this source get rel="nofollow"
+    # (useful for affiliate/adult/partner sites you don't want to vouch for).
+    is_nofollow = db.Column(db.Boolean, default=False, nullable=False,
+                            server_default='0')
+    cta = db.Column(db.String(40), nullable=True)       # "Follow", "Subscribe"
     category = db.Column(db.String(40), default='Other', nullable=False)
     sort_order = db.Column(db.Integer, default=0)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    is_adult = db.Column(db.Boolean, default=False, nullable=False,
+                         server_default='0')
+    is_deleted = db.Column(db.Boolean, default=False, nullable=False,
+                           server_default='0')  # soft delete (admin CRUD)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(),
+                           nullable=False)
+    updated_at = db.Column(db.DateTime, nullable=True)
 
     HEX_RE = None  # set below (avoids shadowing confusion in class body)
 
@@ -373,7 +387,14 @@ class LinkSource(db.Model):
 
     @classmethod
     def active(cls):
-        return (cls.query.filter_by(is_active=True)
+        """Sources shown to users: not soft-deleted and flagged active."""
+        return (cls.query.filter_by(is_deleted=False, is_active=True)
+                .order_by(cls.sort_order, cls.name).all())
+
+    @classmethod
+    def catalogue(cls):
+        """Everything except soft-deleted rows (admin list view)."""
+        return (cls.query.filter_by(is_deleted=False)
                 .order_by(cls.sort_order, cls.name).all())
 
     @classmethod
@@ -405,10 +426,15 @@ class LinkSource(db.Model):
         if cls.query.first() is not None:
             return
         for idx, (name, domains, bg, txt, brd, icon, cat) in enumerate(DEFAULT_LINK_SOURCES):
+            first_domain = (domains or '').split(',')[0].strip()
+            url = f'https://{first_domain}/' if first_domain else None
+            pattern = (f'https://{first_domain}/{{handle}}'
+                       if first_domain else None)
             db.session.add(cls(name=name, domains=domains, bg_color=bg,
                                text_color=txt, border_color=brd,
                                icon_code=icon, category=cat,
-                               sort_order=idx))
+                               sort_order=idx, url=url,
+                               profile_pattern=pattern))
         db.session.commit()
 
 
