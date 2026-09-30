@@ -290,6 +290,51 @@ class Link(db.Model):
         return f'bi bi-{code}'
 
     @property
+    def placeholder_url(self):
+        """Example URL hint for this link's source (network-specific shape).
+
+        Networks call the same thing different names — GitHub wants a
+        username, Steam a profile id, Discord an invite code — so when a
+        source defines a {handle} profile pattern we show its real shape.
+        """
+        src = self.matched_source
+        if src and src.profile_pattern:
+            return src.profile_pattern.replace('{handle}', 'username')
+        if src and src.url:
+            return src.url
+        return 'https://…'
+
+    @property
+    def placeholder_handle(self):
+        """Example handle hint for this link's source ('@…' line)."""
+        src = self.matched_source
+        if not src:
+            return '@handle (optional)'
+        hints = {
+            'GitHub': '@username',
+            'Steam': '@steamid64 or /id/vanity',
+            'Discord': 'server name or invite code',
+            'Twitch': '@channelname',
+            'X / Twitter': '@handle',
+            'Threads': '@handle',
+            'Instagram': '@handle',
+            'TikTok': '@username',
+            'YouTube': '@channelhandle',
+            'Reddit': 'u/username',
+            'SoundCloud': '/username',
+            'Bandcamp': '/artistname',
+            'Medium': '@username',
+            'Substack': 'publication name',
+            'Etsy': '/shopname',
+            'Patreon': '/creatorname',
+            'Ko-fi': '/username',
+            'Buy Me a Coffee': '/username',
+        }
+        hint = hints.get(src.name)
+        return f'@{hint}' if hint and not hint.startswith(('u/', '/', 'server')) \
+            else (hint or '@handle (optional)')
+
+    @property
     def safe_utm(self):
         """UTM string only if it looks like genuine UTM params."""
         u = (self.utm_params or '').strip()
