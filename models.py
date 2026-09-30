@@ -447,7 +447,7 @@ DEFAULT_LINK_SOURCES = [
     ('Twitch',    'twitch.tv',                        '#9146ff', '#ffffff', '#772ce8', 'twitch',        'Content'),
     ('Vimeo',     'vimeo.com',                        '#1ab7ea', '#ffffff', '#1494bd', 'vimeo',         'Content'),
     ('Medium',    'medium.com',                       '#12100e', '#ffffff', '#000000', 'medium',        'Content'),
-    ('Substack',  'substack.com',                     '#ff6719', '#ffffff', '#d95511', 'envelope-paper','#Content'),
+    ('Substack',  'substack.com',                     '#ff6719', '#ffffff', '#d95511', 'envelope-paper', 'Content'),
     ('Spotify',   'spotify.com',                      '#1db954', '#0b2a14', '#169c46', 'spotify',       'Music'),
     ('Apple Music','music.apple.com',                 '#fa243c', '#ffffff', '#c91e31', 'apple-music',   'Music'),
     ('SoundCloud','soundcloud.com',                   '#ff5500', '#ffffff', '#d64800', 'cloud-fill',    'Music'),

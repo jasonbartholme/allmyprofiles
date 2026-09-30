@@ -1,0 +1,168 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}Admin · Import / Export Catalogue — All My Profiles{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 900px;">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="fw-bold mb-0"><i class="bi bi-arrow-left-right text-primary me-2"></i>Import / Export Link Networks</h2>
+    <a href="{{ url_for('admin_link_sources') }}" class="btn btn-outline-secondary rounded-pill px-4">
+      <i class="bi bi-share-fill me-1"></i>Back to sources
+    </a>
+  </div>
+  {{ dash.nav('link-sources') }}
+
+  <ul class="nav nav-tabs mb-4">
+    <li class="nav-item">
+      <a class="nav-link {{ 'active' if active_tab in ('import', None, 'preview') }}" href="{{ url_for('admin_link_source_import') }}">
+        <i class="bi bi-upload me-1"></i>Import
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" href="{{ url_for('admin_link_source_export') }}">
+        <i class="bi bi-download me-1"></i>Export (JSON)
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link" href="{{ url_for('admin_link_source_export', deleted=1) }}">
+        <i class="bi bi-recycle me-1"></i>Export incl. deleted
+      </a>
+    </li>
+  </ul>
+
+  <p class="text-muted">
+    Bulk-add networks across any niche. The file is JSON; each record maps to the
+    same fields the source form uses, and <strong>categories are matched by label</strong>
+    (e.g. <code>"category": "Music"</code>) — never by database id, so files move
+    between environments cleanly. Nothing is written unless every record validates
+    (all-or-nothing), and you can preview first.
+  </p>
+
+  {% if active_tab == 'preview' and plan %}
+  {# ---------- dry-run preview: what WOULD happen ---------- #}
+  <div class="card border-warning mb-4">
+    <div class="card-header fw-semibold bg-warning-subtle">
+      <i class="bi bi-eye me-1"></i>Dry run — nothing has been imported yet
+    </div>
+    <div class="card-body">
+      {% macro action_rows(items, badge, verb) %}
+        {% if items %}
+        <h6 class="mt-3">{{ verb }} <span class="badge rounded-pill text-bg-secondary">{{ items | length }}</span></h6>
+        <ul class="list-group list-group-flush small">
+          {% for it in items %}
+          <li class="list-group-item d-flex align-items-center gap-2 px-0">
+            <span class="badge text-bg-light border">{{ badge }}</span>{{ it }}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      {% endmacro %}
+      {% for table in ['categories', 'sources'] %}
+        {% set b = plan[table] %}
+        <p class="fw-semibold mb-1 text-capitalize mt-3"><i class="bi bi-tags me-1"></i>{{ table }}</p>
+        {% if not (b.create or b.revive or b.changed or b.skip) %}
+          <p class="text-muted small mb-0">Nothing in this file.</p>
+        {% endif %}
+        {{ action_rows(b.create, 'new', 'Create') }}
+        {{ action_rows(b.revive, 'revive', 'Restore &amp; overwrite (soft-deleted rows)') }}
+        {{ action_rows(b.changed, "update", "Overwrite existing live rows") }}
+        {{ action_rows(b.skip, 'skip', 'Skipped (already exist)') }}
+      {% endfor %}
+    </div>
+    <div class="card-footer d-flex justify-content-between align-items-center">
+      <form method="POST" enctype="multipart/form-data" class="d-inline">
+        <input type="hidden" name="text" value="{{ form.text or '' }}">
+        <input type="hidden" name="source_mode" value="{{ form.source_mode or 'overwrite' }}">
+        <input type="hidden" name="category_mode" value="{{ form.category_mode or 'overwrite' }}">
+        <button class="btn btn-success rounded-pill px-4">
+          <i class="bi bi-check2-circle me-1"></i>Looks right — import now
+        </button>
+      </form>
+      <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('admin_link_source_import') }}">
+        <i class="bi bi-x-lg me-1"></i>Cancel
+      </a>
+    </div>
+  </div>
+  {% else %}
+  {# ---------- import form ---------- #}
+  <form method="POST" enctype="multipart/form-data" class="card">
+    <div class="card-body">
+      <div class="mb-3">
+        <label class="form-label fw-semibold" for="file">Upload a .json file</label>
+        <input class="form-control" type="file" name="file" id="file" accept=".json,application/json">
+        <div class="form-text">Or paste the JSON below — pasted text wins only if no file is chosen.</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold" for="text">…or paste JSON</label>
+        <textarea class="form-control font-monospace" name="text" id="text" rows="10"
+                  placeholder='{ "format": "allmyprofiles-catalogue/1", "sources": [ ... ] }'>{{ form.text or '' }}</textarea>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="source_mode">If a <em>source</em> name already exists</label>
+          <select class="form-select" name="source_mode" id="source_mode">
+            <option value="overwrite" {{ 'selected' if (form.source_mode or 'overwrite') == 'overwrite' }}>Overwrite it with the file's data</option>
+            <option value="skip" {{ 'selected' if form.source_mode == 'skip' }}>Skip it — keep what's live</option>
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="category_mode">If a <em>category</em> label already exists</label>
+          <select class="form-select" name="category_mode" id="category_mode">
+            <option value="overwrite" {{ 'selected' if (form.category_mode or 'overwrite') == 'overwrite' }}>Overwrite its colors/icon/order</option>
+            <option value="skip" {{ 'selected' if form.category_mode == 'skip' }}>Skip it — keep what's live</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" name="preview" id="preview" value="on"
+               {{ 'checked' if form.preview }}>
+        <label class="form-check-label" for="preview">
+          <i class="bi bi-eye me-1"></i>Dry run — show me what would change without importing
+        </label>
+      </div>
+
+      <details class="mb-3">
+        <summary class="fw-semibold text-primary" style="cursor:pointer;">
+          <i class="bi bi-filetype-json me-1"></i>Format reference &amp; example record
+        </summary>
+        <pre class="bg-light border rounded p-3 mt-2 small mb-0">{
+  "format": "allmyprofiles-catalogue/1",
+  "categories": [
+    { "name": "Crypto", "icon_code": "currency-bitcoin",
+      "bg_color": "#f7f3e8", "text_color": "#7a5b12", "sort_order": 10 }
+  ],
+  "sources": [
+    { "name": "CoinMarketCap",
+      "domains": "coinmarketcap.com",
+      "url": "https://coinmarketcap.com/",
+      "profile_pattern": "https://coinmarketcap.com/community/{handle}/",
+      "bg_color": "#1e2026", "text_color": "#ffffff", "border_color": "#0b0c0f",
+      "icon_code": "graph-up-arrow",
+      "category": "Crypto",
+      "cta": "Follow",
+      "sort_order": 0,
+      "is_active": true, "is_adult": false, "is_nofollow": false }
+  ]
+}</pre>
+        <p class="small text-muted mb-0">
+          Required per source: <code>name</code>. Everything else falls back to safe defaults.
+          <code>domains</code> = comma-separated bare hostnames (no http://).
+          <code>profile_pattern</code> must contain <code>{'{handle}'}</code>. Colors must be hex
+          (<code>#rrggbb</code>). Icons are Bootstrap Icons slugs without the <code>bi-</code> prefix.
+          A source may reference a category created earlier in the same file.
+          Category links are always resolved <strong>by label</strong>, never by database id.
+          Custom icon uploads aren't part of the portable format (binary); re-attach them in the edit form after import.
+        </p>
+      </details>
+    </div>
+    <div class="card-footer d-flex gap-2">
+      <button class="btn btn-primary rounded-pill px-4">
+        <i class="bi bi-upload me-1"></i>Import
+      </button>
+      <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('admin_link_sources') }}">Cancel</a>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

@@ -32,6 +32,7 @@ from models import (db, User, Link, Setting, Activity, Message, MessageRead,
                     LINK_CATEGORIES, MESSAGE_CATEGORIES, MESSAGE_SEVERITIES,
                     PAID_TIERS, HEX_COLOR_RE)
 from uploads_util import save_upload_image, delete_upload_image
+import catalogue_io
 
 login_manager = LoginManager()
 login_manager.login_view = 'login'
@@ -1836,6 +1837,141 @@ def register_link_source_routes(app):
         db.session.commit()
         flash(f'Link source "{src.name}" restored.', 'success')
         return redirect(url_for('admin_link_sources'))
+
+    # ------------------------------------------------ bulk import/export
+
+    @app.route('/admin/link-sources/export')
+    @admin_required
+    def admin_link_source_export():
+        """Download the catalogue as JSON (categories + sources). Sources
+        reference categories by label, so the file is portable across
+        environments where ids differ."""
+        include_deleted = request.args.get('deleted') == '1'
+        body = catalogue_io.export_json(include_deleted=include_deleted)
+        stamp = datetime.now().strftime('%Y%m%d-%H%M')
+        resp = Response(body, mimetype='application/json')
+        resp.headers['Content-Disposition'] = (
+            f'attachment; filename="allmyprofiles-catalogue-{stamp}.json"')
+        Activity.record('link_catalogue_exported', actor=_real_admin(),
+                        detail=f'exported catalogue ({len(body)} bytes'
+                               f'{", incl. deleted" if include_deleted else ""})')
+        db.session.commit()
+        return resp
+
+    @app.route('/admin/link-sources/import', methods=['GET', 'POST'])
+    @admin_required
+    def admin_link_source_import():
+        """Bulk-import networks (and their categories) from a JSON file or
+        pasted text. Validation-first: nothing is written unless every
+        record in the file is clean. Supports a dry-run preview and an
+        overwrite/skip policy for names that already exist live."""
+        template_ctx = dict(active_tab='import', form={})
+
+        if request.method == 'POST':
+            # A body over Flask's MAX_CONTENT_LENGTH yields an empty parse;
+            # surface a clear message instead of "nothing supplied".
+            if not request.form and not request.files.get('file'):
+                flash('Upload failed — the request was larger than the '
+                      'server limit (5 MB). Trim the file or import in '
+                      'smaller batches.', 'danger')
+                return render_template(
+                    'admin/link_source_import.html',
+                    **template_ctx, categories=LinkCategory.names())
+            raw = ''
+            filename = None
+            upload = request.files.get('file')
+            if upload and upload.filename:
+                filename = upload.filename
+                try:
+                    raw = upload.read().decode('utf-8-sig', errors='replace')
+                except Exception:
+                    flash('Could not read the uploaded file as UTF-8 text.',
+                          'danger')
+                    return render_template(
+                        'admin/link_source_import.html',
+                        **template_ctx, categories=LinkCategory.names())
+            else:
+                raw = request.form.get('text') or ''
+            if not raw.strip():
+                flash('Choose a .json file or paste the JSON text to import.',
+                      'danger')
+                return render_template(
+                    'admin/link_source_import.html',
+                    **template_ctx, categories=LinkCategory.names())
+
+            source_mode = (request.form.get('source_mode')
+                           if request.form.get('source_mode')
+                           in ('overwrite', 'skip') else 'overwrite')
+            category_mode = (request.form.get('category_mode')
+                             if request.form.get('category_mode')
+                             in ('overwrite', 'skip') else 'overwrite')
+            dry_run = request.form.get('preview') == 'on'
+
+            try:
+                result, errors = catalogue_io.import_from_text(
+                    raw, source_mode=source_mode,
+                    category_mode=category_mode, dry_run=dry_run)
+            except catalogue_io.ImportError_ as e:
+                flash(str(e), 'danger')
+                return render_template(
+                    'admin/link_source_import.html',
+                    **template_ctx, categories=LinkCategory.names())
+
+            if errors:
+                for err in errors[:25]:
+                    flash(err, 'danger')
+                if len(errors) > 25:
+                    flash(f'…and {len(errors) - 25} more problems.', 'danger')
+                flash('Nothing was imported — fix the file and try again.',
+                      'warning')
+                return render_template(
+                    'admin/link_source_import.html',
+                    **{'active_tab': 'import',
+                       'form': {'text': raw, 'source_mode': source_mode,
+                                'category_mode': category_mode,
+                                'preview': 'on' if dry_run else None}},
+                    categories=LinkCategory.names())
+
+            if dry_run:
+                plan = result['plan']
+                # Flatten to display-friendly name lists for the template.
+                preview = {}
+                for table, bucket in plan.items():
+                    preview[table] = {
+                        'create': [d['name'] for d in bucket['create']],
+                        'revive': [d['name'] for _, d in bucket['revive']],
+                        # "changed" (not update/items): dict attribute access
+                        # in Jinja resolves to dict methods first, so keys
+                        # that collide with them must be renamed.
+                        'changed': [d['name'] for _, d in bucket['update']],
+                        'skip': list(bucket['skip']),
+                    }
+                return render_template(
+                    'admin/link_source_import.html',
+                    active_tab='preview', plan=preview,
+                    form={'text': raw, 'source_mode': source_mode,
+                          'category_mode': category_mode, 'preview': 'on'},
+                    categories=LinkCategory.names())
+
+            summary = result
+            db.session.commit()
+            Activity.record(
+                'link_catalogue_imported', actor=_real_admin(),
+                detail=(f'bulk import via {filename or "pasted text"}: '
+                        f"{summary['created']} created, "
+                        f"{summary['updated']} updated, "
+                        f"{summary['revived']} revived, "
+                        f"{summary['skipped']} skipped"))
+            db.session.commit()
+            flash(f"Import complete: {summary['created']} created, "
+                  f"{summary['updated']} updated, "
+                  f"{summary['revived']} revived, "
+                  f"{summary['skipped']} skipped.", 'success')
+            return redirect(url_for('admin_link_sources'))
+
+        return render_template('admin/link_source_import.html',
+                               **template_ctx,
+                               categories=LinkCategory.names())
 
 
 # ==========================================
