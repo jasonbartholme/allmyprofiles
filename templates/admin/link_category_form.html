@@ -1,0 +1,195 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit' if cat else 'New' }} Link Category — All My Profiles{% endblock %}
+
+{% block content %}
+{% set form = form or {} %}
+{# Resolve each field's value with sensible defaults for a brand-new row. #}
+{% set v_name  = form.get('name') or (cat.name if cat else '') %}
+{% set v_icon  = form.get('icon_code') or (cat.icon_code if cat else 'tag') %}
+{% set v_bg    = (form.get('bg_color') or (cat.bg_color if cat else '#f8f9fa'))|lower %}
+{% set v_txt   = (form.get('text_color') or (cat.text_color if cat else '#212529'))|lower %}
+{% set v_order = form.get('sort_order') %}
+{% if v_order is none or v_order == '' %}
+  {% if cat %}{% set v_order = cat.sort_order %}{% else %}{% set v_order = 0 %}{% endif %}
+{% endif %}
+
+<div class="container py-4" style="max-width: 760px;">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb small mb-2">
+      <li class="breadcrumb-item"><a href="{{ url_for('admin_link_categories') }}">Link Categories</a></li>
+      <li class="breadcrumb-item active">{{ 'Edit category' if cat else 'New category' }}</li>
+    </ol>
+  </nav>
+  <h2 class="fw-bold mb-1">
+    {% if cat %}<i class="bi bi-pencil-square text-primary me-2"></i>Edit “{{ cat.name }}”{% else %}
+    <i class="bi bi-tag text-primary me-2"></i>New link category{% endif %}
+  </h2>
+  <p class="text-muted">Categories are the tabs/sections that group link sources on public
+    profiles. Everything here renders live to users — use the preview below to check it.</p>
+
+  {% if cat and cat.name == 'Other' %}
+  <div class="alert alert-warning d-flex align-items-center gap-2 py-2">
+    <i class="bi bi-shield-lock"></i>
+    <span class="small"><strong>“Other” is the protected fallback bucket.</strong> Its name is locked;
+      you can still change its icon, colors and order.</span>
+  </div>
+  {% endif %}
+
+  <form method="POST" class="card mt-3">
+    <div class="card-body p-4">
+
+      {# ---------- Live preview ---------- #}
+      <div class="mb-4">
+        <label class="form-label fw-semibold small text-uppercase text-muted">Preview</label>
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+          <span id="previewPill" class="d-inline-flex align-items-center gap-2 px-3 py-2 rounded-3 fw-semibold"
+                style="background:{{ v_bg }};color:{{ v_txt }};">
+            <i id="previewIcon" class="bi bi-{{ v_icon or 'tag' }}"></i><span id="previewName">{{ v_name or 'Category name' }}</span>
+          </span>
+          <small class="text-muted">This is how the tab looks on user profiles.</small>
+        </div>
+      </div>
+
+      {# ---------- Name ---------- #}
+      <div class="mb-3">
+        <label for="name" class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
+        <input type="text" class="form-control" id="name" name="name" maxlength="40" required
+               placeholder="e.g. Gaming &amp; Dev"
+               {% if cat and cat.name == 'Other' %}readonly{% endif %}
+               value="{{ v_name }}" oninput="syncPreview()">
+        <div class="form-text">Shown as the profile tab label. Max 40 characters; must be unique.</div>
+      </div>
+
+      {# ---------- Icon ---------- #}
+      <div class="mb-3">
+        <label for="icon_code" class="form-label fw-semibold">Icon <span class="text-muted small fw-normal">(Bootstrap Icons slug)</span></label>
+        <div class="input-group">
+          <span class="input-group-text bg-white"><i id="iconPrefix" class="bi bi-{{ v_icon or 'tag' }}"></i></span>
+          <span class="input-group-text text-muted small">bi-</span>
+          <input type="text" class="form-control" id="icon_code" name="icon_code" maxlength="48"
+                 placeholder="people" value="{{ v_icon }}" oninput="syncPreview()"
+                 pattern="[a-z0-9][a-z0-9\-]{0,48}" title="Lowercase letters, digits and hyphens, e.g. people-camera">
+        </div>
+        <div class="form-text">
+          Any <a href="https://icons.getbootstrap.com/" target="_blank" rel="noopener">Bootstrap Icon</a> slug
+          (e.g. <code>people</code>, <code>camera-reels</code>, <code>controller</code>, <code>music-note-beamed</code>).
+          Common ones:
+          {% for slug in ['globe','people','camera-reels','chat-dots','controller','music-note-beamed','bag','briefcase','journal-text','heart','star','geo-alt','camera-video','mic','pen','cash-coin','tag'] %}
+          <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 me-1 mb-1 icon-chip" data-icon="{{ slug }}"><i class="bi bi-{{ slug }}"></i> {{ slug }}</button>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# ---------- Colors ---------- #}
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label for="bg_color" class="form-label fw-semibold">Background color</label>
+          <div class="input-group">
+            <input type="color" class="form-control form-control-color border-end-0" id="bg_picker"
+                   value="{{ v_bg }}" aria-label="Pick background color" oninput="setColor('bg', this.value)">
+            <input type="text" class="form-control" id="bg_color" name="bg_color" maxlength="7"
+                   value="{{ v_bg }}" pattern="#[0-9a-fA-F]{6}" required oninput="syncPreview()">
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label for="text_color" class="form-label fw-semibold">Text color</label>
+          <div class="input-group">
+            <input type="color" class="form-control form-control-color border-end-0" id="txt_picker"
+                   value="{{ v_txt }}" aria-label="Pick text color" oninput="setColor('txt', this.value)">
+            <input type="text" class="form-control" id="text_color" name="text_color" maxlength="7"
+                   value="{{ v_txt }}" pattern="#[0-9a-fA-F]{6}" required oninput="syncPreview()">
+          </div>
+        </div>
+      </div>
+      <div class="mb-3">
+        <span class="text-muted small me-2">Suggested palettes:</span>
+        {% for bg, txt in [('#eef2ff','#3730a3'), ('#fdf2f8','#9d174d'), ('#ecfdf5','#065f46'), ('#fff7ed','#9a3412'), ('#f0f9ff','#0c4a6e'), ('#faf5ff','#6b21a8')] %}
+        <button type="button" class="btn btn-sm btn-outline-secondary me-1 mb-1 palette-chip"
+                style="background:{{ bg }};color:{{ txt }};" data-bg="{{ bg }}" data-txt="{{ txt }}">Aa</button>
+        {% endfor %}
+      </div>
+
+      {# ---------- Sort order + rename cascade ---------- #}
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label for="sort_order" class="form-label fw-semibold">Sort order</label>
+          <input type="number" class="form-control" id="sort_order" name="sort_order" min="0" max="999"
+                 value="{{ v_order }}">
+          <div class="form-text">Lower numbers appear first on profiles.</div>
+        </div>
+        {% if cat and cat.name != 'Other' %}
+        <div class="col-md-8 d-flex align-items-end pb-1">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="apply_rename" id="apply_rename">
+            <label class="form-check-label" for="apply_rename">
+              Apply rename to linked sources
+              {% if source_count is defined and source_count is not none %}
+              <span class="badge text-bg-secondary ms-1">{{ source_count }} source(s)</span>
+              {% endif %}
+            </label>
+            <div class="form-text">If you change the name above, also update every link source
+              currently filed under “{{ cat.name }}”. Leave unchecked to re-file them manually.</div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card-footer d-flex justify-content-between align-items-center bg-white">
+      <a href="{{ url_for('admin_link_categories') }}" class="btn btn-outline-secondary rounded-pill px-4">Cancel</a>
+      <button class="btn btn-primary rounded-pill px-4">
+        <i class="bi bi-check2-lg me-1"></i>{{ 'Save changes' if cat else 'Create category' }}
+      </button>
+    </div>
+  </form>
+
+  {% if cat %}
+  <form method="POST" class="mt-3"
+        action="{{ url_for('admin_link_category_delete', cat_id=cat.id) }}"
+        onsubmit="return confirm('Delete “{{ cat.name }}”? Its linked sources will be moved to \"Other\".');">
+    {% if cat.name != 'Other' %}
+    <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash me-1"></i>Delete this category</button>
+    {% endif %}
+  </form>
+  {% endif %}
+</div>
+
+<script>
+  function syncPreview() {
+    const name = document.getElementById('name').value.trim();
+    const icon = document.getElementById('icon_code').value.trim() || 'tag';
+    const bg   = /^#[0-9a-fA-F]{6}$/.test(document.getElementById('bg_color').value)
+                 ? document.getElementById('bg_color').value : '#f8f9fa';
+    const txt  = /^#[0-9a-fA-F]{6}$/.test(document.getElementById('text_color').value)
+                 ? document.getElementById('text_color').value : '#212529';
+    document.getElementById('previewName').textContent = name || 'Category name';
+    document.getElementById('previewPill').style.background = bg;
+    document.getElementById('previewPill').style.color = txt;
+    document.getElementById('previewIcon').className = 'bi bi-' + icon;
+    document.getElementById('iconPrefix').className = 'bi bi-' + icon;
+    const bp = document.getElementById('bg_picker');
+    const tp = document.getElementById('txt_picker');
+    if (bp && /^#[0-9a-fA-F]{6}$/.test(bg)) bp.value = bg;
+    if (tp && /^#[0-9a-fA-F]{6}$/.test(txt)) tp.value = txt;
+  }
+  function setColor(which, val) {
+    (which === 'bg' ? document.getElementById('bg_color')
+                    : document.getElementById('text_color')).value = val;
+    syncPreview();
+  }
+  document.querySelectorAll('.icon-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('icon_code').value = btn.dataset.icon;
+      syncPreview();
+    });
+  });
+  document.querySelectorAll('.palette-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('bg_color').value = btn.dataset.bg;
+      document.getElementById('text_color').value = btn.dataset.txt;
+      syncPreview();
+    });
+  });
+  syncPreview();
+</script>
+{% endblock %}
