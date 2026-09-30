@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}Admin · Reply Macros — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 900px">
+  <h2 class="fw-bold mb-3"><i class="bi bi-chat-square-text text-primary me-2"></i>Admin · Reply Macros</h2>
+  {{ dash.nav('macros') }}
+
+  <p class="text-muted small">
+    Canned replies you can insert when messaging users or replying to abuse reports.
+    Use placeholders like <code>${'{'}user${'}'}</code>, <code>${'{'}display_name${'}'}</code>,
+    <code>${'{'}site_name${'}'}</code>, <code>${'{'}today${'}'}</code>,
+    <code>${'{'}help_url${'}'}</code> — they are filled in at send time.
+  </p>
+
+  <div class="card p-3 mb-4">
+    <h6 class="fw-bold mb-3"><i class="bi bi-plus-circle me-1"></i>New macro</h6>
+    <form method="POST" action="{{ url_for('admin_macro_new') }}">
+      <div class="row g-2">
+        <div class="col-md-5">
+          <input name="name" class="form-control" placeholder="e.g. ToS — adult content warning" required maxlength="80">
+        </div>
+        <div class="col-12">
+          <textarea name="body" rows="4" class="form-control" required
+            placeholder="Hi ${'{'}display_name${'}'},&#10;&#10;…your standard reply text…"></textarea>
+        </div>
+        <div class="col-12">
+          <button class="btn btn-primary">Create macro</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  {% for m in macros %}
+    <details class="card mb-2" {{ 'open' if loop.first and not macros.__len__() > 1 }}>
+      <summary class="card-header fw-semibold bg-white">
+        <i class="bi bi-reply me-1 text-primary"></i>{{ m.name }}
+        <span class="small text-muted ms-2">updated {{ (m.updated_at or m.created_at).strftime('%Y-%m-%d') if m.updated_at or m.created_at else '' }}</span>
+      </summary>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('admin_macro_edit', macro_id=m.id) }}">
+          <div class="mb-2"><input name="name" value="{{ m.name }}" class="form-control form-control-sm" required maxlength="80"></div>
+          <textarea name="body" rows="4" class="form-control form-control-sm mb-2" required>{{ m.body }}</textarea>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-primary">Save changes</button>
+          </div>
+        </form>
+        <form method="POST" action="{{ url_for('admin_macro_delete', macro_id=m.id) }}" class="mt-2"
+              onsubmit="return confirm('Delete macro {{ m.name | tojson }}?')">
+          <button class="btn btn-sm btn-outline-danger">Delete</button>
+        </form>
+      </div>
+    </details>
+  {% else %}
+    <div class="alert alert-light border">No macros yet — create one above.</div>
+  {% endfor %}
+</div>
+{% endblock %}

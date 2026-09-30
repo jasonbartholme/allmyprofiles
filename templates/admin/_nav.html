@@ -1,13 +1,21 @@
 {% macro nav(active) %}
-<ul class="nav nav-pills mb-4">
+<ul class="nav nav-pills mb-4 flex-wrap">
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='overview' }}" href="{{ url_for('admin_dashboard') }}">
     <i class="bi bi-speedometer2 me-1"></i>Overview</a></li>
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='users' }}" href="{{ url_for('admin_users') }}">
     <i class="bi bi-people me-1"></i>Users</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if active=='reports' }}" href="{{ url_for('admin_reports') }}">
+    <i class="bi bi-flag me-1"></i>Reports</a></li>
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='messages' }}" href="{{ url_for('admin_messages') }}">
     <i class="bi bi-envelope-paper me-1"></i>Messages</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if active=='macros' }}" href="{{ url_for('admin_macros') }}">
+    <i class="bi bi-chat-square-text me-1"></i>Macros</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if active=='triage' }}" href="{{ url_for('admin_triage') }}">
+    <i class="bi bi-diagram-3 me-1"></i>Triage</a></li>
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='link-sources' }}" href="{{ url_for('admin_link_sources') }}">
     <i class="bi bi-share-fill me-1"></i>Link Sources</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if active=='audit' }}" href="{{ url_for('admin_audit') }}">
+    <i class="bi bi-journal-text me-1"></i>Audit log</a></li>
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='settings' }}" href="{{ url_for('admin_settings') }}">
     <i class="bi bi-gear me-1"></i>Site settings</a></li>
 </ul>
