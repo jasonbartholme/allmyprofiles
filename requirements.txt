@@ -1,4 +1,8 @@
 Flask>=3.0
+# watchdog is pulled in by Flask/Werkzeug's debug reloader (stat-based fallback).
+# Pin to a release that still exposes the EVENT_TYPE_OPENED constant that
+# Werkzeug's reloader imports — very old or unpinned versions break `flask run --debug`.
+watchdog>=4.0,<6.1
 Flask-SQLAlchemy>=3.1
 Flask-Login>=0.6
 Flask-Migrate>=4.0
