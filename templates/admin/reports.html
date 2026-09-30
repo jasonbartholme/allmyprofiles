@@ -1,0 +1,179 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}Admin · Reports — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-3"><i class="bi bi-flag text-danger me-2"></i>Admin · Abuse Reports</h2>
+  {{ dash.nav('reports') }}
+
+  {# Status tabs with counts #}
+  <ul class="nav nav-pills mb-3 small">
+    {% for s in ['open', 'reviewing', 'resolved', 'dismissed', 'all'] %}
+      {% set n = counts.get(s, 0) if s != 'all' else counts.values() | sum %}
+      <li class="nav-item">
+        <a class="nav-link {{ 'active' if status == s }}"
+           href="{{ url_for('admin_reports', status=s, reason=reason, q=q) }}">
+          {{ s | capitalize }}
+          {% if n %}<span class="badge text-bg-light border ms-1">{{ n }}</span>{% endif %}
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+
+  {# Filters + saved views #}
+  <div class="d-flex flex-wrap gap-2 align-items-end mb-3">
+    <form class="d-flex gap-2" method="GET" action="{{ url_for('admin_reports') }}">
+      <input type="hidden" name="status" value="{{ status }}">
+      <input type="search" name="q" class="form-control form-control-sm" style="min-width:220px"
+             placeholder="Target username or email…" value="{{ q }}">
+      <select name="reason" class="form-select form-select-sm" style="width:auto">
+        <option value="">All reasons</option>
+        {% for key, label in reasons.items() %}
+          <option value="{{ key }}" {{ 'selected' if reason == key }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-sm btn-primary">Filter</button>
+    </form>
+    {% for v in views %}
+      <a class="btn btn-sm btn-outline-secondary"
+         href="{{ url_for('admin_reports') }}?{{ v.query_string }}">
+        <i class="bi bi-bookmark me-1"></i>{{ v.name }}
+        <button class="btn-close btn-close-ms" form="delview{{ v.id }}" style="font-size:.6rem"></button>
+      </a>
+      <form id="delview{{ v.id }}" method="POST" action="{{ url_for('admin_delete_view', view_id=v.id) }}"
+            class="d-none"></form>
+    {% endfor %}
+    <form method="POST" action="{{ url_for('admin_save_view') }}" class="d-flex gap-1">
+      <input type="hidden" name="page" value="reports">
+      <input type="hidden" name="query_string"
+             value="status={{ status }}&reason={{ reason }}&q={{ q | urlencode }}">
+      <input type="hidden" name="next" value="{{ request.full_path }}">
+      <input name="name" class="form-control form-control-sm" style="width:150px"
+             placeholder="Save this filter…">
+      <button class="btn btn-sm btn-outline-primary" title="Save current filters as a view">
+        <i class="bi bi-bookmark-plus"></i></button>
+    </form>
+  </div>
+
+  {# Bulk actions wrap the whole table #}
+  <form method="POST" action="{{ url_for('admin_reports_bulk') }}">
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-2 p-2 bg-light rounded">
+      <label class="small mb-0"><input type="checkbox" id="check-all-reports" class="me-1"> Select all</label>
+      <select name="action" class="form-select form-select-sm" style="width:auto" required>
+        <option value="">Bulk action…</option>
+        {% for s in statuses %}<option value="{{ s }}">Set status: {{ s | capitalize }}</option>{% endfor %}
+        <option value="note">Append note to all selected</option>
+      </select>
+      <input name="note" class="form-control form-control-sm" style="width:240px"
+             placeholder="Note text (for bulk note)">
+      <button class="btn btn-sm btn-dark">Apply</button>
+    </div>
+
+    <div class="card p-0 overflow-hidden">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr class="small text-muted">
+            <th style="width:2.2rem"></th>
+            <th>Target / Reason</th><th>Details</th><th>Reporter</th>
+            <th>Status</th><th>Received</th><th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for r in reports %}
+          <tr>
+            <td><input type="checkbox" name="ids" value="{{ r.id }}" class="row-check"></td>
+            <td>
+              <div class="fw-semibold">@{{ r.target_user.username if r.target_user else '?' }}</div>
+              <div class="small text-muted">{{ r.reason_label }}</div>
+              {% if r.target_link_id %}<div class="small text-muted">link #{{ r.target_link_id }}</div>{% endif %}
+            </td>
+            <td class="small" style="max-width:280px">
+              {{ r.details | truncate(140) }}
+              {% if r.admin_note %}
+                <div class="text-muted mt-1"><i class="bi bi-pencil me-1"></i>{{ r.admin_note | truncate(90) }}</div>
+              {% endif %}
+            </td>
+            <td class="small text-muted">
+              {% if r.reporter_name %}{{ r.reporter_name }}<br>{% endif %}
+              {{ r.reporter_email or 'anonymous' }}
+            </td>
+            <td>
+              <span class="badge text-bg-{{ {'open':'danger','reviewing':'warning','resolved':'success','dismissed':'secondary'}[r.status] }}">
+                {{ r.status }}</span>
+              {% if 'auto' in (r.admin_note or '') %}<span class="badge text-bg-info">auto-triaged</span>{% endif %}
+            </td>
+            <td class="small text-muted">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }}</td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse"
+                      data-bs-target="#rep{{ r.id }}"><i class="bi bi-sliders"></i></button>
+            </td>
+          </tr>
+          <tr class="collapse" id="rep{{ r.id }}"><td colspan="7" class="bg-light">
+            <div class="row g-3 p-2">
+              <div class="col-md-6">
+                <form method="POST" action="{{ url_for('admin_report_update', report_id=r.id) }}">
+                  <label class="form-label small fw-semibold mb-1">Status & internal note</label>
+                  <div class="d-flex gap-1 mb-2">
+                    <select name="status" class="form-select form-select-sm" style="width:auto">
+                      {% for s in statuses %}
+                        <option value="{{ s }}" {{ 'selected' if r.status == s }}>{{ s | capitalize }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <textarea name="admin_note" rows="2" class="form-control form-control-sm mb-2"
+                            placeholder="Internal note (not shown to users)…">{{ r.admin_note or '' }}</textarea>
+                  <button class="btn btn-sm btn-primary">Save</button>
+                </form>
+              </div>
+              <div class="col-md-6">
+                <form method="POST" action="{{ url_for('admin_report_message', report_id=r.id) }}">
+                  <label class="form-label small fw-semibold mb-1">Message profile owner</label>
+                  <input name="subject" class="form-control form-control-sm mb-1"
+                         placeholder="Subject (defaults to macro name)">
+                  <textarea name="body" rows="2" class="form-control form-control-sm mb-1"
+                            placeholder="Body — or pick a macro below and leave empty"></textarea>
+                  <div class="d-flex gap-1">
+                    <select name="macro_id" class="form-select form-select-sm">
+                      <option value="">Insert a reply macro… (leaves body empty)</option>
+                      {% for m in macros %}
+                        <option value="{{ m.id }}">{{ m.name }}</option>
+                      {% endfor %}
+                    </select>
+                    <button class="btn btn-sm btn-warning text-nowrap">Send ToS notice</button>
+                  </div>
+                  <div class="form-text">Sent to @{{ r.target_user.username if r.target_user else '?' }} inbox as “Terms of Service notice”.</div>
+                </form>
+              </div>
+            </div>
+          </td></tr>
+        {% else %}
+          <tr><td colspan="7" class="text-muted p-4 text-center">No reports match this filter. 🎉</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </form>
+
+  {% if pagination.pages > 1 %}
+  <nav class="mt-3">
+    <ul class="pagination pagination-sm justify-content-center">
+      {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+        {% if p %}
+          <li class="page-item {{ 'active' if p == pagination.page }}">
+            <a class="page-link" href="{{ url_for('admin_reports', status=status, reason=reason, q=q, page=p) }}">{{ p }}</a></li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% endif %}
+      {% endfor %}
+    </ul>
+  </nav>
+  {% endif %}
+</div>
+
+<script>
+  document.getElementById('check-all-reports')?.addEventListener('change', function () {
+    document.querySelectorAll('.row-check').forEach(cb => cb.checked = this.checked);
+  });
+</script>
+{% endblock %}

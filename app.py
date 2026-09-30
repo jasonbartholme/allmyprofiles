@@ -957,9 +957,21 @@ def register_inbox_routes(app):
                     -r.delivered_at.timestamp())
         reads = sorted(reads, key=sort_key)
 
+        # Visitor contact messages (from public profile forms) shown in the
+        # same inbox, newest first; archived tab includes archived contacts.
+        cq = ContactMessage.query.filter_by(recipient_id=current_user.id)
+        if view == 'archived':
+            cq = cq.filter(ContactMessage.is_archived.is_(True))
+        elif view == 'unread':
+            cq = cq.filter(ContactMessage.is_archived.is_(False),
+                           ContactMessage.is_read.is_(False))
+        else:  # 'inbox'
+            cq = cq.filter(ContactMessage.is_archived.is_(False))
+        contacts = cq.order_by(ContactMessage.created_at.desc()).all()
+
         unread_total = current_user.unread_messages
-        return render_template('inbox.html', reads=reads, view=view,
-                               category=category,
+        return render_template('inbox.html', reads=reads, contacts=contacts,
+                               view=view, category=category,
                                unread_total=unread_total,
                                categories=MESSAGE_CATEGORIES)
 
@@ -1017,8 +1029,21 @@ def register_inbox_routes(app):
         """Open a visitor contact message (marks it read)."""
         msg = ContactMessage.query.filter_by(id=contact_id,
                                              recipient_id=current_user.id).first_or_404()
+        if request.method == 'POST':
+            # Reply from the inbox: deliver to the sender as an admin-style
+            # message? No — record status and mailto-free note. We mark the
+            # item 'replied' and show a confirmation; actual reply happens
+            # via the sender's email shown on the page.
+            action = request.form.get('action')
+            if action == 'reply-marked':
+                msg.status = 'replied'
+                db.session.commit()
+                flash('Marked as replied.', 'success')
+            return redirect(url_for('inbox_contact', contact_id=msg.id))
         if not msg.is_read:
             msg.is_read = True
+            if msg.status == 'new':
+                msg.status = 'read'
             db.session.commit()
         return render_template('inbox_contact.html', msg=msg)
 
@@ -1121,6 +1146,13 @@ def register_public_interaction_routes(app):
             target_user_id=target.id, target_link_id=link_id,
             reason=reason, details=details[:5000])
         db.session.add(report)
+        db.session.flush()  # assign report.id before triage notes reference it
+        Activity.record('report_submitted', user=target,
+                        detail=f'{reason} (report #{report.id})')
+        try:
+            apply_triage_rules(report)  # auto-status by admin-defined rules
+        except Exception:
+            pass  # automation must never block a public report submission
         db.session.commit()
         return render_template('report_thanks.html')
 
@@ -1326,9 +1358,11 @@ def register_admin_routes(app):
         page = request.args.get('page', 1, type=int)
         pagination = query.order_by(User.created_at.desc()).paginate(
             page=page, per_page=25, error_out=False)
+        views = SavedView.query.filter_by(page='users') \
+            .order_by(SavedView.name).all()
         return render_template('admin/users.html',
                                pagination=pagination, users=pagination.items,
-                               q=q)
+                               q=q, views=views)
 
     @app.route('/admin/user/<int:user_id>/tier', methods=['POST'])
     @admin_required
@@ -1505,6 +1539,8 @@ def register_admin_message_routes(app):
                                        audiences=audiences,
                                        categories=MESSAGE_CATEGORIES,
                                        severities=MESSAGE_SEVERITIES,
+                                       macros=ReplyMacro.query.order_by(
+                                           ReplyMacro.name).all(),
                                        form=request.form), 400
 
             if audience != 'one':
@@ -1533,6 +1569,8 @@ def register_admin_message_routes(app):
                                audiences=audiences,
                                categories=MESSAGE_CATEGORIES,
                                severities=MESSAGE_SEVERITIES,
+                               macros=ReplyMacro.query.order_by(
+                                   ReplyMacro.name).all(),
                                form={})
 
     @app.route('/admin/messages/delete/<int:message_id>', methods=['POST'])
@@ -1758,6 +1796,484 @@ def register_link_source_routes(app):
         db.session.commit()
         flash(f'Link source "{src.name}" restored.', 'success')
         return redirect(url_for('admin_link_sources'))
+
+
+# ==========================================
+# Admin Productivity: bulk actions, saved views, reply macros,
+# abuse-report console with triage automation, audit log
+# ==========================================
+
+MACRO_PLACEHOLDERS = {
+    'site_name': 'AllMyProfiles',
+    'admin_email': 'support@allmyprofiles.com',
+    'help_url': '/help',
+    'today': None,  # filled at render time
+}
+
+
+def apply_triage_rules(report):
+    """Run active TriageRules against a new AbuseReport. First match wins.
+
+    Returns the matching rule or None. Caller commits.
+    """
+    rules = (TriageRule.query.filter_by(is_active=True)
+             .order_by(TriageRule.priority.desc(), TriageRule.id).all())
+    for rule in rules:
+        try:
+            if rule.matches(report):
+                report.status = rule.set_status or report.status
+                if rule.note:
+                    stamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+                    prefix = f'[auto · {rule.name} · {stamp}]'
+                    report.admin_note = ((report.admin_note or '') + '\n'
+                                         + prefix + ' ' + rule.note).strip()
+                Activity.record('triage_applied', user=report.target_user,
+                                detail=f'rule "{rule.name}" → '
+                                       f'{report.status} (report #{report.id})')
+                return rule
+        except Exception:
+            continue  # a bad rule must never break public reporting
+    return None
+
+
+def register_admin_productivity_routes(app):
+
+    # ---------------- Abuse reports console ------------------------------
+
+    @app.route('/admin/reports')
+    @admin_required
+    def admin_reports():
+        status = request.args.get('status', 'open')
+        if status not in REPORT_STATUSES + ['all']:
+            status = 'open'
+        reason = request.args.get('reason', '')
+        q = (request.args.get('q') or '').strip().lower()
+
+        query = AbuseReport.query
+        if status != 'all':
+            query = query.filter(AbuseReport.status == status)
+        if reason in REPORT_REASONS:
+            query = query.filter(AbuseReport.reason == reason)
+        if q:
+            query = (query.join(User, AbuseReport.target_user_id == User.id)
+                     .filter(db.or_(User.username.ilike(f'%{q}%'),
+                                    User.email.ilike(f'%{q}%'))))
+        page = request.args.get('page', 1, type=int)
+        pagination = (query.order_by(AbuseReport.created_at.desc())
+                      .paginate(page=page, per_page=20, error_out=False))
+        counts = dict(db.session.query(AbuseReport.status,
+                                       func.count(AbuseReport.id))
+                      .group_by(AbuseReport.status).all())
+        views = SavedView.query.filter_by(page='reports') \
+            .order_by(SavedView.name).all()
+        macros = ReplyMacro.query.order_by(ReplyMacro.name).all()
+        return render_template('admin/reports.html',
+                               pagination=pagination,
+                               reports=pagination.items,
+                               status=status, reason=reason, q=q,
+                               counts=counts, reasons=REPORT_REASONS,
+                               statuses=REPORT_STATUSES, views=views,
+                               macros=macros)
+
+    @app.route('/admin/report/<int:report_id>/update', methods=['POST'])
+    @admin_required
+    def admin_report_update(report_id):
+        report = db.session.get(AbuseReport, report_id)
+        if report is None:
+            abort(404)
+        new_status = request.form.get('status')
+        note = (request.form.get('admin_note') or '').strip()[:2000]
+        changed = False
+        if new_status in REPORT_STATUSES and new_status != report.status:
+            report.status = new_status
+            report.resolved_by_id = current_user.id
+            changed = True
+        if note and note != (report.admin_note or ''):
+            report.admin_note = note
+            changed = True
+        if changed:
+            report.updated_at = datetime.now()
+            Activity.record('report_update', user=report.target_user,
+                            actor=current_user,
+                            detail=f'report #{report.id} → {report.status}')
+            db.session.commit()
+            flash(f'Report #{report.id} updated.', 'success')
+        return redirect(request.referrer or url_for('admin_reports'))
+
+    @app.route('/admin/reports/bulk', methods=['POST'])
+    @admin_required
+    def admin_reports_bulk():
+        ids = _bulk_ids(request.form.getlist('ids'))
+        action = request.form.get('action')
+        if not ids:
+            flash('Select at least one report first.', 'warning')
+            return redirect(request.referrer or url_for('admin_reports'))
+        done = 0
+        if action in REPORT_STATUSES:
+            now = datetime.now()
+            done = (AbuseReport.query.filter(AbuseReport.id.in_(ids))
+                    .update({'status': action, 'updated_at': now,
+                             'resolved_by_id': current_user.id},
+                            synchronize_session=False))
+        elif action == 'note':
+            note = (request.form.get('note') or '').strip()[:500]
+            if note:
+                for r in AbuseReport.query.filter(AbuseReport.id.in_(ids)).all():
+                    r.admin_note = ((r.admin_note or '') + f'\n[note] {note}').strip()
+                    r.updated_at = datetime.now()
+                done = len(ids)
+        if done:
+            Activity.record('bulk_action', actor=current_user,
+                            detail=f'reports: {action} on {done} item(s)')
+            db.session.commit()
+            flash(f'Bulk “{action}” applied to {done} report(s).', 'success')
+        else:
+            flash('Bulk action needs a valid status or note text.', 'danger')
+        return redirect(request.referrer or url_for('admin_reports'))
+
+    @app.route('/admin/report/<int:report_id>/message', methods=['POST'])
+    @admin_required
+    def admin_report_message(report_id):
+        """Reply to the *profile owner* about a report using a macro."""
+        report = db.session.get(AbuseReport, report_id)
+        if report is None:
+            abort(404)
+        subject = (request.form.get('subject') or '').strip()
+        body = (request.form.get('body') or '').strip()
+        macro_id = request.form.get('macro_id', type=int)
+        if not body and macro_id:
+            macro = db.session.get(ReplyMacro, macro_id)
+            if macro:
+                ctx = dict(MACRO_PLACEHOLDERS)
+                ctx['today'] = datetime.now().strftime('%B %d, %Y')
+                ctx['user'] = report.target_user.username
+                ctx['display_name'] = report.target_user.display_name or \
+                    report.target_user.username
+                body = macro.render(ctx)
+                subject = subject or macro.name
+        if not subject or not body:
+            flash('A subject and body (or a macro) are required.', 'danger')
+            return redirect(url_for('admin_reports'))
+        send_admin_message(subject=subject, body=body, category='tos_violation',
+                           sender=current_user, audience='one',
+                           target_user=report.target_user)
+        Activity.record('report_reply', user=report.target_user,
+                        actor=current_user,
+                        detail=f'messaged about report #{report.id}')
+        db.session.commit()
+        flash(f'Message sent to @{report.target_user.username}.', 'success')
+        return redirect(request.referrer or url_for('admin_reports'))
+
+    # ---------------- Users bulk actions ---------------------------------
+
+    @app.route('/admin/users/bulk', methods=['POST'])
+    @admin_required
+    def admin_users_bulk():
+        ids = _bulk_ids(request.form.getlist('ids'))
+        action = request.form.get('action')
+        if not ids:
+            flash('Select at least one user first.', 'warning')
+            return redirect(request.referrer or url_for('admin_users'))
+        me = current_user.id
+        targets = User.query.filter(User.id.in_(ids)).all()
+        done = 0
+        if action in TIERS:
+            now = datetime.now()
+            for u in targets:
+                if u.tier != action:
+                    old = u.tier
+                    u.tier = action
+                    u.tier_changed_at = now
+                    Activity.record('tier_change', user=u, actor=current_user,
+                                    detail=f'{old} → {action} (bulk)')
+                    done += 1
+        elif action == 'message':
+            subject = (request.form.get('subject') or '').strip()
+            body = (request.form.get('body') or '').strip()
+            macro_id = request.form.get('macro_id', type=int)
+            if not body and macro_id:
+                macro = db.session.get(ReplyMacro, macro_id)
+                if macro:
+                    ctx = dict(MACRO_PLACEHOLDERS)
+                    ctx['today'] = now_ctx_date()
+                    body = macro.render(ctx)
+                    subject = subject or macro.name
+            if subject and body:
+                delivered = 0
+                for u in targets:
+                    _, n = send_admin_message(subject=subject, body=body,
+                                              category='note',
+                                              sender=current_user,
+                                              audience='one', target_user=u,
+                                              commit=False)
+                    delivered += n
+                db.session.commit()
+                flash(f'Message delivered to {delivered} user(s).', 'success')
+                return redirect(request.referrer or url_for('admin_users'))
+            flash('Bulk message needs a subject and body (or pick a macro).',
+                  'danger')
+            return redirect(request.referrer or url_for('admin_users'))
+        elif action == 'revoke_admin':
+            for u in targets:
+                if u.is_admin and u.id != me:
+                    u.is_admin = False
+                    Activity.record('admin_flag_change', user=u,
+                                    actor=current_user,
+                                    detail='revoked (bulk)')
+                    done += 1
+        if done:
+            Activity.record('bulk_action', actor=current_user,
+                            detail=f'users: {action} on {done} item(s)')
+            db.session.commit()
+            flash(f'Bulk “{action}” applied to {done} user(s).', 'success')
+        else:
+            flash('Nothing to do — check your selection and action.',
+                  'warning')
+        return redirect(request.referrer or url_for('admin_users'))
+
+    # ---------------- Saved views ----------------------------------------
+
+    @app.route('/admin/saved-views', methods=['POST'])
+    @admin_required
+    def admin_save_view():
+        name = (request.form.get('name') or '').strip()[:60]
+        page_key = request.form.get('page')
+        qs = (request.form.get('query_string') or '').strip()[:300]
+        back = request.form.get('next') or ''
+        if not back.startswith('/'):
+            back = ''
+        if page_key not in ('users', 'reports'):
+            flash('Unknown view target.', 'danger')
+        elif not name:
+            flash('Give the saved view a name.', 'danger')
+        else:
+            db.session.add(SavedView(name=name, page=page_key,
+                                     query_string=qs))
+            Activity.record('saved_view_created', actor=current_user,
+                            detail=f'"{name}" ({page_key})')
+            db.session.commit()
+            flash(f'Saved view “{name}” created.', 'success')
+        return redirect(back or url_for('admin_dashboard'))
+
+    @app.route('/admin/saved-views/<int:view_id>/delete', methods=['POST'])
+    @admin_required
+    def admin_delete_view(view_id):
+        v = db.session.get(SavedView, view_id)
+        if v is None:
+            abort(404)
+        db.session.delete(v)
+        Activity.record('saved_view_deleted', actor=current_user,
+                        detail=f'"{v.name}"')
+        db.session.commit()
+        flash('Saved view deleted.', 'info')
+        return redirect(request.referrer or url_for('admin_dashboard'))
+
+    # ---------------- Reply macros CRUD ----------------------------------
+
+    @app.route('/admin/macros')
+    @admin_required
+    def admin_macros():
+        macros = ReplyMacro.query.order_by(ReplyMacro.name).all()
+        return render_template('admin/macros.html', macros=macros,
+                               placeholders=sorted(MACRO_PLACEHOLDERS))
+
+    @app.route('/admin/macros/new', methods=['POST'])
+    @admin_required
+    def admin_macro_new():
+        name = (request.form.get('name') or '').strip()[:80]
+        body = (request.form.get('body') or '').strip()
+        if not name or not body:
+            flash('Macro needs both a name and a body.', 'danger')
+            return redirect(url_for('admin_macros'))
+        if ReplyMacro.query.filter_by(name=name).first():
+            flash(f'A macro named “{name}” already exists.', 'danger')
+            return redirect(url_for('admin_macros'))
+        db.session.add(ReplyMacro(name=name, body=body[:5000]))
+        Activity.record('macro_created', actor=current_user, detail=f'"{name}"')
+        db.session.commit()
+        flash(f'Macro “{name}” created.', 'success')
+        return redirect(url_for('admin_macros'))
+
+    @app.route('/admin/macros/<int:macro_id>/edit', methods=['POST'])
+    @admin_required
+    def admin_macro_edit(macro_id):
+        m = db.session.get(ReplyMacro, macro_id)
+        if m is None:
+            abort(404)
+        name = (request.form.get('name') or '').strip()[:80]
+        body = (request.form.get('body') or '').strip()
+        if not name or not body:
+            flash('Macro needs both a name and a body.', 'danger')
+            return redirect(url_for('admin_macros'))
+        clash = ReplyMacro.query.filter(ReplyMacro.name == name,
+                                       ReplyMacro.id != macro_id).first()
+        if clash:
+            flash(f'A macro named “{name}” already exists.', 'danger')
+            return redirect(url_for('admin_macros'))
+        m.name, m.body, m.updated_at = name, body[:5000], datetime.now()
+        Activity.record('macro_updated', actor=current_user, detail=f'"{name}"')
+        db.session.commit()
+        flash(f'Macro “{name}” updated.', 'success')
+        return redirect(url_for('admin_macros'))
+
+    @app.route('/admin/macros/<int:macro_id>/delete', methods=['POST'])
+    @admin_required
+    def admin_macro_delete(macro_id):
+        m = db.session.get(ReplyMacro, macro_id)
+        if m is None:
+            abort(404)
+        db.session.delete(m)
+        Activity.record('macro_deleted', actor=current_user,
+                        detail=f'"{m.name}"')
+        db.session.commit()
+        flash('Macro deleted.', 'info')
+        return redirect(url_for('admin_macros'))
+
+    # ---------------- Triage rules CRUD ----------------------------------
+
+    @app.route('/admin/triage')
+    @admin_required
+    def admin_triage():
+        rules = TriageRule.query.order_by(TriageRule.priority.desc(),
+                                          TriageRule.id).all()
+        return render_template('admin/triage.html', rules=rules,
+                               reasons=REPORT_REASONS,
+                               statuses=REPORT_STATUSES)
+
+    @app.route('/admin/triage/new', methods=['POST'])
+    @admin_required
+    def admin_triage_new():
+        errors, data = _validate_triage_form(request.form)
+        if errors:
+            for e in errors:
+                flash(e, 'danger')
+            return redirect(url_for('admin_triage'))
+        db.session.add(TriageRule(**data))
+        Activity.record('triage_rule_created', actor=current_user,
+                        detail=f'"{data["name"]}"')
+        db.session.commit()
+        flash(f'Triage rule “{data["name"]}” created.', 'success')
+        return redirect(url_for('admin_triage'))
+
+    @app.route('/admin/triage/<int:rule_id>/edit', methods=['POST'])
+    @admin_required
+    def admin_triage_edit(rule_id):
+        rule = db.session.get(TriageRule, rule_id)
+        if rule is None:
+            abort(404)
+        errors, data = _validate_triage_form(request.form, rule_id=rule_id)
+        if errors:
+            for e in errors:
+                flash(e, 'danger')
+            return redirect(url_for('admin_triage'))
+        for key, value in data.items():
+            setattr(rule, key, value)
+        Activity.record('triage_rule_updated', actor=current_user,
+                        detail=f'"{rule.name}"')
+        db.session.commit()
+        flash(f'Triage rule “{rule.name}” updated.', 'success')
+        return redirect(url_for('admin_triage'))
+
+    @app.route('/admin/triage/<int:rule_id>/toggle', methods=['POST'])
+    @admin_required
+    def admin_triage_toggle(rule_id):
+        rule = db.session.get(TriageRule, rule_id)
+        if rule is None:
+            abort(404)
+        rule.is_active = not rule.is_active
+        Activity.record('triage_rule_toggled', actor=current_user,
+                        detail=f'"{rule.name}" '
+                               + ('enabled' if rule.is_active else 'paused'))
+        db.session.commit()
+        flash(f'Rule {"enabled" if rule.is_active else "paused"}.', 'info')
+        return redirect(url_for('admin_triage'))
+
+    @app.route('/admin/triage/<int:rule_id>/delete', methods=['POST'])
+    @admin_required
+    def admin_triage_delete(rule_id):
+        rule = db.session.get(TriageRule, rule_id)
+        if rule is None:
+            abort(404)
+        db.session.delete(rule)
+        Activity.record('triage_rule_deleted', actor=current_user,
+                        detail=f'"{rule.name}"')
+        db.session.commit()
+        flash('Triage rule deleted.', 'info')
+        return redirect(url_for('admin_triage'))
+
+    # ---------------- Audit log ------------------------------------------
+
+    @app.route('/admin/audit')
+    @admin_required
+    def admin_audit():
+        kind = (request.args.get('kind') or '').strip()
+        q = (request.args.get('q') or '').strip().lower()
+        query = Activity.query
+        if kind:
+            query = query.filter(Activity.kind == kind)
+        if q:
+            query = query.filter(db.or_(
+                Activity.detail.ilike(f'%{q}%'),
+                Activity.kind.ilike(f'%{q}%')))
+        page = request.args.get('page', 1, type=int)
+        pagination = (query.order_by(Activity.created_at.desc())
+                      .paginate(page=page, per_page=50, error_out=False))
+        kinds = [k[0] for k in db.session.query(Activity.kind)
+                 .distinct().order_by(Activity.kind).all()]
+        return render_template('admin/audit.html',
+                               pagination=pagination,
+                               entries=pagination.items,
+                               kind=kind, q=q, kinds=kinds)
+
+
+def _bulk_ids(raw_list):
+    """Parse checkbox values into a clean list of positive ints (max 200)."""
+    out = []
+    for raw in raw_list or []:
+        try:
+            i = int(raw)
+            if i > 0:
+                out.append(i)
+        except (TypeError, ValueError):
+            continue
+    return out[:200]
+
+
+def now_ctx_date():
+    return datetime.now().strftime('%B %d, %Y')
+
+
+def _validate_triage_form(form, rule_id=None):
+    errors = []
+    name = (form.get('name') or '').strip()[:80]
+    if not name:
+        errors.append('Rule name is required.')
+    dup = TriageRule.query.filter(TriageRule.name == name)
+    if rule_id is not None:
+        dup = dup.filter(TriageRule.id != rule_id)
+    if name and dup.first():
+        errors.append(f'A rule named “{name}” already exists.')
+    set_status = form.get('set_status') or 'reviewing'
+    if set_status not in REPORT_STATUSES:
+        errors.append('Invalid target status.')
+    match_reason = (form.get('match_reason') or '').strip()
+    if match_reason and match_reason not in REPORT_REASONS:
+        errors.append('Invalid reason matcher.')
+    try:
+        priority = int(form.get('priority') or 0)
+    except ValueError:
+        priority = 0
+    cleaned = {
+        'name': name,
+        'match_reason': match_reason or None,
+        'match_domain': (form.get('match_domain') or '').strip().lower()[:120] or None,
+        'match_keyword': (form.get('match_keyword') or '').strip()[:80] or None,
+        'set_status': set_status,
+        'note': (form.get('note') or '').strip()[:300] or None,
+        'is_active': form.get('is_active') != 'off',
+        'priority': priority,
+    }
+    return errors, cleaned
 
 
 # ==========================================
