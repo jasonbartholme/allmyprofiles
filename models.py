@@ -8,6 +8,7 @@ Import `db` from this module when creating tables / running migrations:
 
 import re
 from datetime import datetime
+from urllib.parse import parse_qsl
 
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
@@ -572,6 +573,9 @@ class LinkCheckResult(db.Model):
 # Public contact messages (profile "Contact Me" form -> user inbox)
 # ==========================================
 
+CONTACT_STATUSES = ['new', 'read', 'replied', 'archived']
+
+
 class ContactMessage(db.Model):
     """A message a visitor sent from someone's public profile page.
 
@@ -596,6 +600,9 @@ class ContactMessage(db.Model):
     # Delivery status inside the recipient's inbox
     is_read = db.Column(db.Boolean, default=False, nullable=False)
     is_archived = db.Column(db.Boolean, default=False, nullable=False)
+    # Workflow status for the recipient ('new' → 'read' → 'replied'/'archived')
+    status = db.Column(db.String(20), default='new', nullable=False,
+                       index=True)
 
     recipient = db.relationship('User', foreign_keys=[recipient_id])
 
@@ -655,3 +662,86 @@ class AbuseReport(db.Model):
     @property
     def reason_label(self):
         return REPORT_REASONS.get(self.reason, self.reason)
+
+
+# ==========================================
+# Admin productivity: reply macros, saved views, triage rules
+# ==========================================
+
+class ReplyMacro(db.Model):
+    """Reusable canned-reply template for the admin console.
+
+    Supports {{placeholders}} substituted at send time (see app.py
+    MACRO_PLACEHOLDERS). Macros are shared across all admins.
+    """
+    __tablename__ = 'reply_macros'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False, unique=True)
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    updated_at = db.Column(db.DateTime, nullable=True)
+
+    def render(self, context=None):
+        """Fill known placeholders; leave unknown {{tokens}} intact."""
+        from string import Template
+        return Template(self.body).safe_substitute(context or {})
+
+
+class SavedView(db.Model):
+    """Admin-saved filter combination (users list or abuse reports)."""
+    __tablename__ = 'saved_views'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(60), nullable=False)
+    page = db.Column(db.String(20), nullable=False, default='users')  # users|reports
+    query_string = db.Column(db.String(300), nullable=False, default='')
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+    def url_args(self):
+        return dict(parse_qsl(self.query_string or ''))
+
+
+class TriageRule(db.Model):
+    """Auto-action applied to incoming abuse reports (admin automation).
+
+    Matching is AND-based on optional fields: reason, domain (substring of
+    any reported link URL or the target profile's links), and a keyword in
+    the report details. When matched, the report's status is set and an
+    optional message category/audience note is recorded. Rules run in
+    priority order; first match wins unless `apply_all` is set.
+    """
+    __tablename__ = 'triage_rules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False)
+    # Optional matchers (blank = matches anything)
+    match_reason = db.Column(db.String(30), nullable=True)
+    match_domain = db.Column(db.String(120), nullable=True)   # substring, lowercased
+    match_keyword = db.Column(db.String(80), nullable=True)   # substring in details
+    # Actions
+    set_status = db.Column(db.String(20), nullable=False, default='reviewing')
+    note = db.Column(db.String(300), nullable=True)           # appended to admin_note
+    is_active = db.Column(db.Boolean, default=True, nullable=False,
+                          server_default='1')
+    priority = db.Column(db.Integer, default=0, nullable=False,
+                         server_default='0')
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+    def matches(self, report):
+        if self.match_reason and (report.reason or '') != self.match_reason:
+            return False
+        if self.match_domain:
+            dom = self.match_domain.strip().lower()
+            # Domain can appear on the reported link itself or on any of
+            # the target profile's links.
+            hosts = [_url_host(l.url) or '' for l in report.target_user.links] \
+                if report.target_user else []
+            blob = ' '.join(hosts).lower()
+            if dom not in blob:
+                return False
+        if self.match_keyword:
+            kw = self.match_keyword.strip().lower()
+            if kw and kw not in (report.details or '').lower():
+                return False
+        return True
