@@ -1867,12 +1867,19 @@ def register_link_category_routes(app):
             errors.append('Name is required.')
         elif len(name) > 40:
             errors.append('Name must be 40 characters or fewer.')
-        dup = LinkCategory.query.filter(LinkCategory.name == name,
-                                       LinkCategory.is_deleted == False)  # noqa: E712
+        # The DB enforces unique(name) across ALL rows -- live *and*
+        # soft-deleted -- so the form validator must too. Otherwise a
+        # create can pass validation and then die at commit time with an
+        # IntegrityError whenever a deleted row still holds the name.
+        dup = LinkCategory.query.filter(LinkCategory.name == name)
         if cat_id is not None:
             dup = dup.filter(LinkCategory.id != cat_id)
-        if dup.first():
-            errors.append(f'A category named "{name}" already exists.')
+        clash = dup.first()
+        if clash is not None:
+            hint = (' (a deleted category still holds this name -- restore '
+                    'it from the Deleted list below, or pick another name)'
+                    if clash.is_deleted else '')
+            errors.append(f'A category named "{name}" already exists.{hint}')
 
         icon_code = (form.get('icon_code') or '').strip() or 'tag'
         if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,48}', icon_code):
@@ -1933,7 +1940,15 @@ def register_link_category_routes(app):
             db.session.add(cat)
             Activity.record('link_category_created', actor=_real_admin(),
                             detail=f'created link category "{cat.name}"')
-            db.session.commit()
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                flash(f'A category named "{data["name"]}" already exists '
+                      f'(possibly a deleted one). Restore it from the '
+                      f'Deleted list or choose another name.', 'danger')
+                return render_template('admin/link_category_form.html',
+                                       cat=None, form=request.form)
             flash(f'Category "{cat.name}" created. It is now selectable on '
                   f'link sources.', 'success')
             return redirect(url_for('admin_link_categories'))
@@ -2025,22 +2040,61 @@ def register_link_category_routes(app):
                methods=['POST'])
     @admin_required
     def admin_link_category_restore(cat_id):
+        """Restore a soft-deleted category.
+
+        Because uniqueness is enforced at the DB level across *all* rows
+        (live and deleted), restoring can clash in two ways: another LIVE
+        category already uses the name, or a previously re-created row does.
+        Both are handled here; the admin can also supply ``new_name`` to
+        restore under a different name instead of deleting the conflicting
+        row first.
+        """
         cat = db.session.get(LinkCategory, cat_id)
         if cat is None or not cat.is_deleted:
             abort(404)
-        clash = LinkCategory.query.filter_by(name=cat.name,
-                                             is_deleted=False).first()
-        if clash:
-            flash(f'Cannot restore "{cat.name}": an active category with '
-                  f'that name exists. Delete it first or rename before '
-                  f'restoring.', 'danger')
+        # NOTE: do NOT .strip() before validating — silently trimming a
+        # leading-space name would turn " Foo" into a valid "Foo" and
+        # bypass the shape check below.
+        new_name = request.form.get('new_name') or ''
+        if new_name and (len(new_name) > 40
+                         or not re.fullmatch(r'[^\s].{0,38}[^\s]', new_name)):
+            flash('New name must be 1–40 characters and cannot start or '
+                  'end with whitespace.', 'danger')
             return redirect(url_for('admin_link_categories'))
+        new_name = new_name.strip()
+        target_name = new_name or cat.name
+        clash_live = LinkCategory.query.filter(LinkCategory.name == target_name,
+                                               LinkCategory.id != cat.id,
+                                               LinkCategory.is_deleted == False)  # noqa: E712
+        if clash_live.first():
+            flash(f'Cannot restore as "{target_name}": an active category '
+                  f'with that name exists. Restore under a different name '
+                  f'(optional field next to the Restore button) or delete '
+                  f'the active one first.', 'danger')
+            return redirect(url_for('admin_link_categories'))
+        clash_any = LinkCategory.query.filter(LinkCategory.name == target_name,
+                                              LinkCategory.id != cat.id).first()
+        if clash_any:
+            flash(f'Cannot restore as "{target_name}": a deleted category '
+                  f'already carries that name. Restore under a different '
+                  f'name instead.', 'danger')
+            return redirect(url_for('admin_link_categories'))
+        old_name = cat.name
+        cat.name = target_name
         cat.is_deleted = False
         cat.updated_at = datetime.now()
         Activity.record('link_category_restored', actor=_real_admin(),
-                        detail=f'restored link category "{cat.name}"')
-        db.session.commit()
-        flash(f'Category "{cat.name}" restored.', 'success')
+                        detail=f'restored link category "{target_name}"'
+                               + (f' (was "{old_name}")'
+                                  if target_name != old_name else ''))
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            flash('Restore failed due to a data conflict; nothing changed.',
+                  'danger')
+            return redirect(url_for('admin_link_categories'))
+        flash(f'Category "{target_name}" restored.', 'success')
         return redirect(url_for('admin_link_categories'))
 
     @app.route('/admin/link-categories/reorder', methods=['POST'])
