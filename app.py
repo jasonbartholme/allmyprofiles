@@ -25,7 +25,8 @@ from sqlalchemy import func
 
 from config import config_by_name
 from models import (db, User, Link, Setting, Activity, Message, MessageRead,
-                    LinkCheckResult, LinkSource, ContactMessage, AbuseReport,
+                    LinkCheckResult, LinkSource, LinkCategory,
+                    ContactMessage, AbuseReport,
                     ReplyMacro, SavedView, TriageRule,
                     REPORT_REASONS, REPORT_STATUSES, CONTACT_STATUSES,
                     LINK_CATEGORIES, MESSAGE_CATEGORIES, MESSAGE_SEVERITIES,
@@ -207,8 +208,9 @@ def group_links_for_profile(links):
     """Split active links into pinned + categorized groups (mockup §2).
 
     Pinned links render first with a gold accent; remaining links are
-    bucketed by display category in LINK_CATEGORIES order (unknown
-    categories appended alphabetically).
+    bucketed by display category in the admin-managed LinkCategory order
+    (the catch-all 'Other' always renders last; unknown categories are
+    appended alphabetically before it).
     """
     pinned = [l for l in links if l.is_pinned]
     categorized = {}
@@ -216,12 +218,17 @@ def group_links_for_profile(links):
         if l.is_pinned:
             continue
         categorized.setdefault(l.display_category, []).append(l)
+    order = [c for c in LinkCategory.names() if c != 'Other']
     ordered = {}
-    for cat in LINK_CATEGORIES:
+    for cat in order:
         if cat in categorized:
             ordered[cat] = categorized.pop(cat)
     for cat in sorted(categorized):
+        if cat == 'Other':
+            continue
         ordered[cat] = categorized[cat]
+    if 'Other' in categorized:
+        ordered['Other'] = categorized.pop('Other')
     return pinned, ordered
 
 
@@ -309,6 +316,7 @@ def create_app(config_name=None):
             _ensure_schema(db)
             Setting.seed_defaults()
             LinkSource.seed_defaults()
+            LinkCategory.seed_defaults()
 
     register_routes(app)
     register_static_pages(app)
@@ -318,6 +326,7 @@ def create_app(config_name=None):
     register_admin_routes(app)
     register_admin_message_routes(app)
     register_link_source_routes(app)
+    register_link_category_routes(app)
     register_admin_productivity_routes(app)
     register_error_handlers(app)
     register_template_context(app)
@@ -621,7 +630,7 @@ def register_routes(app):
                 else:
                     link.utm_params = utm or None
                 cat = (request.form.get('category') or '').strip()[:40]
-                link.category = cat if cat in LINK_CATEGORIES else None
+                link.category = cat if cat in LinkCategory.names() else None
                 # Pinning is a paid-tier feature.
                 want_pin = bool(request.form.get('is_pinned'))
                 if want_pin and current_user.tier not in PAID_TIERS:
@@ -641,7 +650,7 @@ def register_routes(app):
                                total_clicks=total_clicks,
                                max_upload_kb=Setting.get_int('max_upload_size_kb', 2048),
                                link_sources=LinkSource.active(),
-                               link_categories=LINK_CATEGORIES,
+                               link_categories=LinkCategory.names(),
                                themes=PROFILE_THEMES,
                                example_link=_dashboard_example_link())
 
@@ -1667,6 +1676,9 @@ def register_link_source_routes(app):
 
         icon_code = (form.get('icon_code') or '').strip() or 'link-45deg'
         category = (form.get('category') or '').strip() or 'Other'
+        if category not in LinkCategory.names():
+            errors.append(f'Unknown category "{category}". Create it under '
+                          f'Admin → Link Categories first.')
         cta = (form.get('cta') or '').strip()[:40]
         try:
             sort_order = int(form.get('sort_order') or 0)
@@ -1706,7 +1718,7 @@ def register_link_source_routes(app):
             .order_by(LinkSource.name).all()
         return render_template('admin/link_sources.html', rows=rows,
                                deleted=deleted,
-                               categories=LINK_CATEGORIES)
+                               categories=LinkCategory.names())
 
     @app.route('/admin/link-sources/new', methods=['GET', 'POST'])
     @admin_required
@@ -1726,7 +1738,7 @@ def register_link_source_routes(app):
                     flash(e, 'danger')
                 return render_template('admin/link_source_form.html',
                                        src=None, form=request.form,
-                                       categories=LINK_CATEGORIES)
+                                       categories=LinkCategory.names())
             src = LinkSource(**data)
             db.session.add(src)
             Activity.record('link_source_created', actor=_real_admin(),
@@ -1736,7 +1748,7 @@ def register_link_source_routes(app):
                   'success')
             return redirect(url_for('admin_link_sources'))
         return render_template('admin/link_source_form.html', src=None,
-                               form=None, categories=LINK_CATEGORIES)
+                               form=None, categories=LinkCategory.names())
 
     @app.route('/admin/link-sources/<int:source_id>/edit',
                methods=['GET', 'POST'])
@@ -1770,7 +1782,7 @@ def register_link_source_routes(app):
                     flash(e, 'danger')
                 return render_template('admin/link_source_form.html',
                                        src=src, form=request.form,
-                                       categories=LINK_CATEGORIES)
+                                       categories=LinkCategory.names())
             for key, value in data.items():
                 setattr(src, key, value)
             src.updated_at = datetime.now()
@@ -1781,7 +1793,7 @@ def register_link_source_routes(app):
                   'success')
             return redirect(url_for('admin_link_sources'))
         return render_template('admin/link_source_form.html', src=src,
-                               form=None, categories=LINK_CATEGORIES)
+                               form=None, categories=LinkCategory.names())
 
     @app.route('/admin/link-sources/<int:source_id>/delete',
                methods=['POST'])
@@ -1824,6 +1836,234 @@ def register_link_source_routes(app):
         db.session.commit()
         flash(f'Link source "{src.name}" restored.', 'success')
         return redirect(url_for('admin_link_sources'))
+
+
+# ==========================================
+# Admin CRUD: Link Source Categories
+# ==========================================
+
+def register_link_category_routes(app):
+    """CRUD for the grouping buckets that organize link sources on public
+    profiles (Admin -> Link Categories).
+
+    Robustness rules baked in here:
+      * Categories are referenced by name from ``LinkSource.category``, so
+        renames can optionally cascade to sources ("Apply to N sources").
+      * Deletes never orphan data: sources in a deleted category fall back
+        to the catch-all 'Other' (or a category the admin reassigns to).
+      * 'Other' is protected — it is the guaranteed fallback bucket and
+        cannot be deleted or renamed.
+    """
+
+    def _source_count(cat_name):
+        return LinkSource.query.filter_by(category=cat_name,
+                                          is_deleted=False).count()
+
+    def _validate_category_form(form, cat_id=None):
+        """Validate admin category fields. Returns (errors, cleaned)."""
+        errors = []
+        name = (form.get('name') or '').strip()
+        if not name:
+            errors.append('Name is required.')
+        elif len(name) > 40:
+            errors.append('Name must be 40 characters or fewer.')
+        dup = LinkCategory.query.filter(LinkCategory.name == name,
+                                       LinkCategory.is_deleted == False)  # noqa: E712
+        if cat_id is not None:
+            dup = dup.filter(LinkCategory.id != cat_id)
+        if dup.first():
+            errors.append(f'A category named "{name}" already exists.')
+
+        icon_code = (form.get('icon_code') or '').strip() or 'tag'
+        if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,48}', icon_code):
+            errors.append('Icon code must be a Bootstrap Icons slug '
+                          '(lowercase letters, digits, hyphens), e.g. "people".')
+
+        colors = {}
+        for field, label in (('bg_color', 'Background'),
+                             ('text_color', 'Text')):
+            value = (form.get(field) or '').strip().lower()
+            if not HEX_COLOR_RE.match(value or ''):
+                errors.append(f'{label} color must be a hex value like '
+                              f'#ff0000.')
+                value = value or ('#f8f9fa' if field == 'bg_color'
+                                  else '#212529')
+            colors[field] = value
+
+        try:
+            sort_order = int(form.get('sort_order') or 0)
+        except ValueError:
+            sort_order = 0
+
+        cleaned = {'name': name, 'icon_code': icon_code,
+                   'sort_order': sort_order, **colors}
+        return errors, cleaned
+
+    @app.route('/admin/link-categories')
+    @admin_required
+    def admin_link_categories():
+        """List categories with live source counts + deleted (recoverable)."""
+        cats = LinkCategory.query.filter_by(is_deleted=False) \
+            .order_by(LinkCategory.sort_order, LinkCategory.name).all()
+        rows = [{'cat': c, 'sources': _source_count(c.name)} for c in cats]
+        deleted = LinkCategory.query.filter_by(is_deleted=True) \
+            .order_by(LinkCategory.name).all()
+        # Sources whose category no longer resolves to a live row — they
+        # render under 'Other'; surface them so admins can re-file them.
+        live_names = {c.name for c in cats}
+        orphans = (LinkSource.query
+                   .filter_by(is_deleted=False)
+                   .order_by(LinkSource.category, LinkSource.name).all())
+        orphans = [s for s in orphans if s.category not in live_names]
+        return render_template('admin/link_categories.html', rows=rows,
+                               deleted=deleted, orphans=orphans,
+                               all_cats=cats)
+
+    @app.route('/admin/link-categories/new', methods=['GET', 'POST'])
+    @admin_required
+    def admin_link_category_new():
+        if request.method == 'POST':
+            errors, data = _validate_category_form(request.form)
+            if errors:
+                for e in errors:
+                    flash(e, 'danger')
+                return render_template('admin/link_category_form.html',
+                                       cat=None, form=request.form)
+            cat = LinkCategory(**data)
+            db.session.add(cat)
+            Activity.record('link_category_created', actor=_real_admin(),
+                            detail=f'created link category "{cat.name}"')
+            db.session.commit()
+            flash(f'Category "{cat.name}" created. It is now selectable on '
+                  f'link sources.', 'success')
+            return redirect(url_for('admin_link_categories'))
+        next_order = (max((c.sort_order for c in LinkCategory.query.all()),
+                          default=-1) + 1)
+        return render_template('admin/link_category_form.html', cat=None,
+                               form={'sort_order': next_order})
+
+    @app.route('/admin/link-categories/<int:cat_id>/edit',
+               methods=['GET', 'POST'])
+    @admin_required
+    def admin_link_category_edit(cat_id):
+        cat = db.session.get(LinkCategory, cat_id)
+        if cat is None or cat.is_deleted:
+            abort(404)
+        protected = cat.name == 'Other'
+        if request.method == 'POST':
+            if protected:
+                flash('"Other" is the protected fallback category — its '
+                      'name cannot be changed. Colors, icon and order can.',
+                      'warning')
+                form_data = dict(request.form)
+                form_data['name'] = cat.name
+            else:
+                form_data = request.form
+            errors, data = _validate_category_form(form_data, cat_id=cat_id)
+            if errors:
+                for e in errors:
+                    flash(e, 'danger')
+                return render_template('admin/link_category_form.html',
+                                       cat=cat, form=request.form)
+            old_name = cat.name
+            rename_applied = 0
+            if data['name'] != old_name and not protected:
+                if request.form.get('apply_rename') == 'on':
+                    rename_applied = LinkSource.query.filter_by(
+                        category=old_name).update(
+                        {'category': data['name']},
+                        synchronize_session='fetch')
+            for key, value in data.items():
+                setattr(cat, key, value)
+            cat.updated_at = datetime.now()
+            Activity.record('link_category_updated', actor=_real_admin(),
+                            detail=f'updated link category "{cat.name}"'
+                                   + (f' (renamed from "{old_name}", '
+                                      f'{rename_applied} source(s) moved)'
+                                      if data['name'] != old_name else ''))
+            db.session.commit()
+            flash(f'Category "{cat.name}" updated.', 'success')
+            return redirect(url_for('admin_link_categories'))
+        return render_template('admin/link_category_form.html', cat=cat,
+                               form=None, protected=protected,
+                               source_count=_source_count(cat.name))
+
+    @app.route('/admin/link-categories/<int:cat_id>/delete',
+               methods=['POST'])
+    @admin_required
+    def admin_link_category_delete(cat_id):
+        """Soft delete with explicit reassignment of member sources."""
+        cat = db.session.get(LinkCategory, cat_id)
+        if cat is None or cat.is_deleted:
+            abort(404)
+        if cat.name == 'Other':
+            flash('"Other" is the protected fallback category and cannot '
+                  'be deleted.', 'danger')
+            return redirect(url_for('admin_link_categories'))
+        target_name = (request.form.get('move_to') or 'Other').strip()
+        target = LinkCategory.query.filter_by(name=target_name,
+                                              is_deleted=False).first()
+        if target is None or target.id == cat.id:
+            target = LinkCategory.query.filter_by(name='Other',
+                                                  is_deleted=False).first()
+        moved = 0
+        if target is not None:
+            moved = LinkSource.query.filter_by(category=cat.name).update(
+                {'category': target.name}, synchronize_session='fetch')
+        cat.is_deleted = True
+        cat.updated_at = datetime.now()
+        Activity.record('link_category_deleted', actor=_real_admin(),
+                        detail=f'deleted link category "{cat.name}" '
+                               f'({moved} source(s) moved to '
+                               f'"{target.name if target else "??"}")')
+        db.session.commit()
+        flash(f'Category "{cat.name}" deleted; {moved} source(s) moved to '
+              f'"{target.name if target else "Other"}".', 'info')
+        return redirect(url_for('admin_link_categories'))
+
+    @app.route('/admin/link-categories/<int:cat_id>/restore',
+               methods=['POST'])
+    @admin_required
+    def admin_link_category_restore(cat_id):
+        cat = db.session.get(LinkCategory, cat_id)
+        if cat is None or not cat.is_deleted:
+            abort(404)
+        clash = LinkCategory.query.filter_by(name=cat.name,
+                                             is_deleted=False).first()
+        if clash:
+            flash(f'Cannot restore "{cat.name}": an active category with '
+                  f'that name exists. Delete it first or rename before '
+                  f'restoring.', 'danger')
+            return redirect(url_for('admin_link_categories'))
+        cat.is_deleted = False
+        cat.updated_at = datetime.now()
+        Activity.record('link_category_restored', actor=_real_admin(),
+                        detail=f'restored link category "{cat.name}"')
+        db.session.commit()
+        flash(f'Category "{cat.name}" restored.', 'success')
+        return redirect(url_for('admin_link_categories'))
+
+    @app.route('/admin/link-categories/reorder', methods=['POST'])
+    @admin_required
+    def admin_link_category_reorder():
+        """Persist tab order: form sends comma-separated ids in new order."""
+        ids = []
+        for chunk in (request.form.get('order') or '').split(','):
+            chunk = chunk.strip()
+            if chunk.isdigit():
+                ids.append(int(chunk))
+        if not ids:
+            abort(400)
+        for pos, cid in enumerate(ids):
+            cat = db.session.get(LinkCategory, cid)
+            if cat is not None and not cat.is_deleted:
+                cat.sort_order = pos
+        Activity.record('link_category_reordered', actor=_real_admin(),
+                        detail='reordered link categories')
+        db.session.commit()
+        flash('Category order saved. Profile tabs follow this order.',
+              'success')
+        return redirect(url_for('admin_link_categories'))
 
 
 # ==========================================
