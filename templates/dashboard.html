@@ -43,6 +43,30 @@
   .source-form.active { border-style: solid; }
   /* Inputs stay on light surfaces even when the panel takes brand colors */
   .source-form input, .source-form select { color-scheme: light; }
+  /* Field labels sit directly on the brand-tinted panel — give them a solid
+     white chip so they stay legible over any network background color. */
+  .source-form .form-label {
+    display: inline-flex; align-items: center; gap: .3rem; max-width: 100%;
+    background: #fff; color: #212529 !important; font-weight: 600;
+    padding: .1rem .5rem; border-radius: .4rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+  }
+  .source-form .form-label > span { font-weight: 400; color: #495057; }
+  /* Helper text: Bootstrap's default .form-text is low-contrast gray that
+     disappears against brand backgrounds — render it as a high-contrast chip
+     with a leading info icon instead. */
+  .source-form .form-text {
+    display: flex; align-items: baseline; gap: .4rem;
+    color: #212529 !important; font-size: .8rem; opacity: 1 !important;
+    background: #fff; border: 1px solid rgba(0, 0, 0, .15);
+    border-radius: .5rem; padding: .3rem .6rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+  }
+  .source-form .form-text::before {
+    content: '\F05A'; font-family: 'bootstrap-icons';
+    color: var(--bs-primary, #4c8dff); flex: 0 0 auto; transform: translateY(1px);
+  }
+  .source-form .form-text strong { font-weight: 700; }
   @media (max-width: 575.98px) { .source-picker { grid-template-columns: 1fr 1fr; } }
 </style>
 {% endblock %}
@@ -218,8 +242,8 @@
                        placeholder="?utm_source=…" maxlength="300">
               </div>
             </div>
-            <div class="d-flex justify-content-between align-items-center mt-2">
-              <div class="form-text mb-0" id="sourceNote">Leave on auto-detect and we’ll match the network from your URL.</div>
+            <div class="d-flex justify-content-between align-items-center gap-2 mt-2 flex-wrap">
+              <div class="form-text mb-0 flex-grow-1" id="sourceNote">Leave on auto-detect and we’ll match the network from your URL.</div>
               <button type="submit" class="btn btn-primary rounded-pill px-4">Add link</button>
             </div>
           </div>
@@ -443,19 +467,16 @@
         form.style.color = d.text;
         note.innerHTML = '<strong>' + name + '</strong> selected — its brand colors, icon'
           + (d.adult ? ' (18+)' : '') + ' and default “' + (d.cta || 'Follow') + '” label will be applied.';
-        note.style.opacity = '.85';
       } else if (name) {
         form.classList.add('active');
         form.style.cssText = '';
         form.style.borderColor = d.text || '';
         note.innerHTML = '<strong>' + name + '</strong> selected — its brand colors, icon'
           + (d.adult ? ' (18+)' : '') + ' and default “' + (d.cta || 'Follow') + '” label will be applied.';
-        note.style.opacity = '';
       } else {
         form.classList.remove('active');
         form.style.cssText = '';
         note.textContent = 'Leave on auto-detect and we’ll match the network from your URL.';
-        note.style.opacity = '';
       }
       // Light-surface inputs need dark text on bright brand panels.
       const inputs = form.querySelectorAll('input');
