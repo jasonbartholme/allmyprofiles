@@ -26,7 +26,8 @@ from sqlalchemy import func
 from config import config_by_name
 from models import (db, User, Link, Setting, Activity, Message, MessageRead,
                     LinkCheckResult, LinkSource, ContactMessage, AbuseReport,
-                    REPORT_REASONS, REPORT_STATUSES,
+                    ReplyMacro, SavedView, TriageRule,
+                    REPORT_REASONS, REPORT_STATUSES, CONTACT_STATUSES,
                     LINK_CATEGORIES, MESSAGE_CATEGORIES, MESSAGE_SEVERITIES,
                     PAID_TIERS, HEX_COLOR_RE)
 from uploads_util import save_upload_image, delete_upload_image
@@ -313,9 +314,11 @@ def create_app(config_name=None):
     register_static_pages(app)
     register_seo_routes(app)
     register_inbox_routes(app)
+    register_public_interaction_routes(app)
     register_admin_routes(app)
     register_admin_message_routes(app)
     register_link_source_routes(app)
+    register_admin_productivity_routes(app)
     register_error_handlers(app)
     register_template_context(app)
 
