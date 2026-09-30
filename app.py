@@ -32,6 +32,7 @@ from models import (db, User, Link, Setting, Activity, Message, MessageRead,
                     LINK_CATEGORIES, MESSAGE_CATEGORIES, MESSAGE_SEVERITIES,
                     PAID_TIERS, HEX_COLOR_RE)
 from uploads_util import save_upload_image, delete_upload_image
+import catalogue_io
 
 login_manager = LoginManager()
 login_manager.login_view = 'login'
@@ -1837,6 +1838,141 @@ def register_link_source_routes(app):
         flash(f'Link source "{src.name}" restored.', 'success')
         return redirect(url_for('admin_link_sources'))
 
+    # ------------------------------------------------ bulk import/export
+
+    @app.route('/admin/link-sources/export')
+    @admin_required
+    def admin_link_source_export():
+        """Download the catalogue as JSON (categories + sources). Sources
+        reference categories by label, so the file is portable across
+        environments where ids differ."""
+        include_deleted = request.args.get('deleted') == '1'
+        body = catalogue_io.export_json(include_deleted=include_deleted)
+        stamp = datetime.now().strftime('%Y%m%d-%H%M')
+        resp = Response(body, mimetype='application/json')
+        resp.headers['Content-Disposition'] = (
+            f'attachment; filename="allmyprofiles-catalogue-{stamp}.json"')
+        Activity.record('link_catalogue_exported', actor=_real_admin(),
+                        detail=f'exported catalogue ({len(body)} bytes'
+                               f'{", incl. deleted" if include_deleted else ""})')
+        db.session.commit()
+        return resp
+
+    @app.route('/admin/link-sources/import', methods=['GET', 'POST'])
+    @admin_required
+    def admin_link_source_import():
+        """Bulk-import networks (and their categories) from a JSON file or
+        pasted text. Validation-first: nothing is written unless every
+        record in the file is clean. Supports a dry-run preview and an
+        overwrite/skip policy for names that already exist live."""
+        template_ctx = dict(active_tab='import', form={})
+
+        if request.method == 'POST':
+            # A body over Flask's MAX_CONTENT_LENGTH yields an empty parse;
+            # surface a clear message instead of "nothing supplied".
+            if not request.form and not request.files.get('file'):
+                flash('Upload failed — the request was larger than the '
+                      'server limit (5 MB). Trim the file or import in '
+                      'smaller batches.', 'danger')
+                return render_template(
+                    'admin/link_source_import.html',
+                    **template_ctx, categories=LinkCategory.names())
+            raw = ''
+            filename = None
+            upload = request.files.get('file')
+            if upload and upload.filename:
+                filename = upload.filename
+                try:
+                    raw = upload.read().decode('utf-8-sig', errors='replace')
+                except Exception:
+                    flash('Could not read the uploaded file as UTF-8 text.',
+                          'danger')
+                    return render_template(
+                        'admin/link_source_import.html',
+                        **template_ctx, categories=LinkCategory.names())
+            else:
+                raw = request.form.get('text') or ''
+            if not raw.strip():
+                flash('Choose a .json file or paste the JSON text to import.',
+                      'danger')
+                return render_template(
+                    'admin/link_source_import.html',
+                    **template_ctx, categories=LinkCategory.names())
+
+            source_mode = (request.form.get('source_mode')
+                           if request.form.get('source_mode')
+                           in ('overwrite', 'skip') else 'overwrite')
+            category_mode = (request.form.get('category_mode')
+                             if request.form.get('category_mode')
+                             in ('overwrite', 'skip') else 'overwrite')
+            dry_run = request.form.get('preview') == 'on'
+
+            try:
+                result, errors = catalogue_io.import_from_text(
+                    raw, source_mode=source_mode,
+                    category_mode=category_mode, dry_run=dry_run)
+            except catalogue_io.ImportError_ as e:
+                flash(str(e), 'danger')
+                return render_template(
+                    'admin/link_source_import.html',
+                    **template_ctx, categories=LinkCategory.names())
+
+            if errors:
+                for err in errors[:25]:
+                    flash(err, 'danger')
+                if len(errors) > 25:
+                    flash(f'…and {len(errors) - 25} more problems.', 'danger')
+                flash('Nothing was imported — fix the file and try again.',
+                      'warning')
+                return render_template(
+                    'admin/link_source_import.html',
+                    **{'active_tab': 'import',
+                       'form': {'text': raw, 'source_mode': source_mode,
+                                'category_mode': category_mode,
+                                'preview': 'on' if dry_run else None}},
+                    categories=LinkCategory.names())
+
+            if dry_run:
+                plan = result['plan']
+                # Flatten to display-friendly name lists for the template.
+                preview = {}
+                for table, bucket in plan.items():
+                    preview[table] = {
+                        'create': [d['name'] for d in bucket['create']],
+                        'revive': [d['name'] for _, d in bucket['revive']],
+                        # "changed" (not update/items): dict attribute access
+                        # in Jinja resolves to dict methods first, so keys
+                        # that collide with them must be renamed.
+                        'changed': [d['name'] for _, d in bucket['update']],
+                        'skip': list(bucket['skip']),
+                    }
+                return render_template(
+                    'admin/link_source_import.html',
+                    active_tab='preview', plan=preview,
+                    form={'text': raw, 'source_mode': source_mode,
+                          'category_mode': category_mode, 'preview': 'on'},
+                    categories=LinkCategory.names())
+
+            summary = result
+            db.session.commit()
+            Activity.record(
+                'link_catalogue_imported', actor=_real_admin(),
+                detail=(f'bulk import via {filename or "pasted text"}: '
+                        f"{summary['created']} created, "
+                        f"{summary['updated']} updated, "
+                        f"{summary['revived']} revived, "
+                        f"{summary['skipped']} skipped"))
+            db.session.commit()
+            flash(f"Import complete: {summary['created']} created, "
+                  f"{summary['updated']} updated, "
+                  f"{summary['revived']} revived, "
+                  f"{summary['skipped']} skipped.", 'success')
+            return redirect(url_for('admin_link_sources'))
+
+        return render_template('admin/link_source_import.html',
+                               **template_ctx,
+                               categories=LinkCategory.names())
+
 
 # ==========================================
 # Admin CRUD: Link Source Categories
@@ -1867,12 +2003,19 @@ def register_link_category_routes(app):
             errors.append('Name is required.')
         elif len(name) > 40:
             errors.append('Name must be 40 characters or fewer.')
-        dup = LinkCategory.query.filter(LinkCategory.name == name,
-                                       LinkCategory.is_deleted == False)  # noqa: E712
+        # The DB enforces unique(name) across ALL rows -- live *and*
+        # soft-deleted -- so the form validator must too. Otherwise a
+        # create can pass validation and then die at commit time with an
+        # IntegrityError whenever a deleted row still holds the name.
+        dup = LinkCategory.query.filter(LinkCategory.name == name)
         if cat_id is not None:
             dup = dup.filter(LinkCategory.id != cat_id)
-        if dup.first():
-            errors.append(f'A category named "{name}" already exists.')
+        clash = dup.first()
+        if clash is not None:
+            hint = (' (a deleted category still holds this name -- restore '
+                    'it from the Deleted list below, or pick another name)'
+                    if clash.is_deleted else '')
+            errors.append(f'A category named "{name}" already exists.{hint}')
 
         icon_code = (form.get('icon_code') or '').strip() or 'tag'
         if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,48}', icon_code):
@@ -1933,7 +2076,15 @@ def register_link_category_routes(app):
             db.session.add(cat)
             Activity.record('link_category_created', actor=_real_admin(),
                             detail=f'created link category "{cat.name}"')
-            db.session.commit()
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                flash(f'A category named "{data["name"]}" already exists '
+                      f'(possibly a deleted one). Restore it from the '
+                      f'Deleted list or choose another name.', 'danger')
+                return render_template('admin/link_category_form.html',
+                                       cat=None, form=request.form)
             flash(f'Category "{cat.name}" created. It is now selectable on '
                   f'link sources.', 'success')
             return redirect(url_for('admin_link_categories'))
@@ -2025,22 +2176,61 @@ def register_link_category_routes(app):
                methods=['POST'])
     @admin_required
     def admin_link_category_restore(cat_id):
+        """Restore a soft-deleted category.
+
+        Because uniqueness is enforced at the DB level across *all* rows
+        (live and deleted), restoring can clash in two ways: another LIVE
+        category already uses the name, or a previously re-created row does.
+        Both are handled here; the admin can also supply ``new_name`` to
+        restore under a different name instead of deleting the conflicting
+        row first.
+        """
         cat = db.session.get(LinkCategory, cat_id)
         if cat is None or not cat.is_deleted:
             abort(404)
-        clash = LinkCategory.query.filter_by(name=cat.name,
-                                             is_deleted=False).first()
-        if clash:
-            flash(f'Cannot restore "{cat.name}": an active category with '
-                  f'that name exists. Delete it first or rename before '
-                  f'restoring.', 'danger')
+        # NOTE: do NOT .strip() before validating — silently trimming a
+        # leading-space name would turn " Foo" into a valid "Foo" and
+        # bypass the shape check below.
+        new_name = request.form.get('new_name') or ''
+        if new_name and (len(new_name) > 40
+                         or not re.fullmatch(r'[^\s].{0,38}[^\s]', new_name)):
+            flash('New name must be 1–40 characters and cannot start or '
+                  'end with whitespace.', 'danger')
             return redirect(url_for('admin_link_categories'))
+        new_name = new_name.strip()
+        target_name = new_name or cat.name
+        clash_live = LinkCategory.query.filter(LinkCategory.name == target_name,
+                                               LinkCategory.id != cat.id,
+                                               LinkCategory.is_deleted == False)  # noqa: E712
+        if clash_live.first():
+            flash(f'Cannot restore as "{target_name}": an active category '
+                  f'with that name exists. Restore under a different name '
+                  f'(optional field next to the Restore button) or delete '
+                  f'the active one first.', 'danger')
+            return redirect(url_for('admin_link_categories'))
+        clash_any = LinkCategory.query.filter(LinkCategory.name == target_name,
+                                              LinkCategory.id != cat.id).first()
+        if clash_any:
+            flash(f'Cannot restore as "{target_name}": a deleted category '
+                  f'already carries that name. Restore under a different '
+                  f'name instead.', 'danger')
+            return redirect(url_for('admin_link_categories'))
+        old_name = cat.name
+        cat.name = target_name
         cat.is_deleted = False
         cat.updated_at = datetime.now()
         Activity.record('link_category_restored', actor=_real_admin(),
-                        detail=f'restored link category "{cat.name}"')
-        db.session.commit()
-        flash(f'Category "{cat.name}" restored.', 'success')
+                        detail=f'restored link category "{target_name}"'
+                               + (f' (was "{old_name}")'
+                                  if target_name != old_name else ''))
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            flash('Restore failed due to a data conflict; nothing changed.',
+                  'danger')
+            return redirect(url_for('admin_link_categories'))
+        flash(f'Category "{target_name}" restored.', 'success')
         return redirect(url_for('admin_link_categories'))
 
     @app.route('/admin/link-categories/reorder', methods=['POST'])

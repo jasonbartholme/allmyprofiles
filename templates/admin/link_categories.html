@@ -115,8 +115,13 @@
       {% for c in deleted %}
       <li class="list-group-item d-flex justify-content-between align-items-center">
         <span class="text-muted">{{ c.name }} <small>(icon: bi-{{ c.icon_code or 'tag' }})</small></span>
-        <form method="POST" action="{{ url_for('admin_link_category_restore', cat_id=c.id) }}">
-          <button class="btn btn-sm btn-outline-success"><i class="bi bi-arrow-counterclockwise me-1"></i>Restore</button>
+        <form method="POST" class="d-flex gap-2 align-items-center"
+              action="{{ url_for('admin_link_category_restore', cat_id=c.id) }}">
+          {# Optional: restore under a different name if the original clashes #}
+          <input type="text" name="new_name" class="form-control form-control-sm"
+                 style="max-width: 180px;" placeholder="New name (optional)"
+                 maxlength="40" aria-label="Restore under a new name">
+          <button class="btn btn-sm btn-outline-success text-nowrap"><i class="bi bi-arrow-counterclockwise me-1"></i>Restore</button>
         </form>
       </li>
       {% endfor %}
