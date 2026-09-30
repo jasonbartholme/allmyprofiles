@@ -1,0 +1,159 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}Admin · Link Categories — All My Profiles{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="fw-bold mb-0"><i class="bi bi-tags text-primary me-2"></i>Admin · Link Categories</h2>
+    <a href="{{ url_for('admin_link_category_new') }}" class="btn btn-primary rounded-pill px-4">
+      <i class="bi bi-plus-lg me-1"></i>New category
+    </a>
+  </div>
+  {{ dash.nav('link-categories') }}
+
+  <p class="text-muted">
+    Categories group link sources into the tabs/sections on public profile pages.
+    Icon, colors and order set here are <strong>live to users immediately</strong>.
+    The catch-all <span class="badge text-bg-secondary">Other</span> is protected:
+    any source without a valid category renders there.
+  </p>
+
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th style="width:60px">Order</th>
+            <th>Preview</th>
+            <th>Name</th>
+            <th>Icon</th>
+            <th title="Non-deleted link sources assigned to this category">Sources</th>
+            <th>Updated</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="catRows">
+        {% for row in rows %}
+          {% set c = row.cat %}
+          <tr data-id="{{ c.id }}">
+            <td><span class="badge rounded-pill text-bg-light border">{{ loop.index }}</span></td>
+            <td>
+              <span class="d-inline-flex align-items-center gap-2 px-3 py-2 rounded-3 fw-semibold"
+                    style="background:{{ c.bg_color }};color:{{ c.text_color }};">
+                <i class="bi bi-{{ c.icon_code or 'tag' }}"></i>{{ c.name }}
+              </span>
+            </td>
+            <td class="fw-semibold">
+              {{ c.name }}
+              {% if c.name == 'Other' %}<span class="badge text-bg-secondary ms-1" title="Fallback bucket — cannot be deleted or renamed">protected</span>{% endif %}
+            </td>
+            <td><small class="text-muted">bi-{{ c.icon_code or 'tag' }}</small></td>
+            <td><span class="badge rounded-pill text-bg-secondary">{{ row.sources }}</span></td>
+            <td><small class="text-muted">
+              {{ (c.updated_at or c.created_at).strftime('%Y-%m-%d') if (c.updated_at or c.created_at) else '—' }}
+            </small></td>
+            <td class="text-end text-nowrap">
+              <button type="button" class="btn btn-sm btn-outline-secondary" title="Move up"
+                      onclick="moveCat(this, -1)" {% if loop.first %}disabled{% endif %}>
+                <i class="bi bi-arrow-up"></i></button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" title="Move down"
+                      onclick="moveCat(this, 1)" {% if loop.last %}disabled{% endif %}>
+                <i class="bi bi-arrow-down"></i></button>
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_link_category_edit', cat_id=c.id) }}">
+                <i class="bi bi-pencil"></i> Edit</a>
+              {% if c.name != 'Other' %}
+              <form method="POST" class="d-inline"
+                    action="{{ url_for('admin_link_category_delete', cat_id=c.id) }}"
+                    onsubmit="return confirm('Delete {{ c.name }}? Its {{ row.sources }} linked source(s) will be moved to \"Other\".');">
+                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="text-center text-muted py-4">No categories yet — create one.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if rows|length > 1 %}
+    <div class="card-footer d-flex justify-content-between align-items-center">
+      <small class="text-muted">Use the arrows to set tab order, then save.</small>
+      <form method="POST" action="{{ url_for('admin_link_category_reorder') }}">
+        <input type="hidden" name="order" id="orderInput"
+               value="{{ rows|map(attribute='cat.id')|join(',') }}">
+        <button class="btn btn-sm btn-primary rounded-pill px-3" id="saveOrderBtn" disabled>
+          <i class="bi bi-check2 me-1"></i>Save order
+        </button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if orphans %}
+  <div class="card mt-4 border-warning">
+    <div class="card-header fw-semibold text-warning-emphasis">
+      <i class="bi bi-exclamation-triangle me-1"></i>Sources with no matching category (render under “Other”)
+    </div>
+    <ul class="list-group list-group-flush">
+      {% for s in orphans %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <span>{{ s.name }} <small class="text-muted">(stored category: {{ s.category or '—' }})</small></span>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_link_source_edit', source_id=s.id) }}">
+          <i class="bi bi-pencil me-1"></i>Re-file</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if deleted %}
+  <div class="card mt-4">
+    <div class="card-header fw-semibold">Deleted categories (recoverable)</div>
+    <ul class="list-group list-group-flush">
+      {% for c in deleted %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <span class="text-muted">{{ c.name }} <small>(icon: bi-{{ c.icon_code or 'tag' }})</small></span>
+        <form method="POST" action="{{ url_for('admin_link_category_restore', cat_id=c.id) }}">
+          <button class="btn btn-sm btn-outline-success"><i class="bi bi-arrow-counterclockwise me-1"></i>Restore</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+  // Simple up/down reordering without extra dependencies: swap rows in the
+  // DOM, enable "Save order", and post the resulting id sequence.
+  function moveCat(btn, dir) {
+    const row = btn.closest('tr');
+    if (dir === -1 && row.previousElementSibling) {
+      row.parentNode.insertBefore(row, row.previousElementSibling);
+    } else if (dir === 1 && row.nextElementSibling) {
+      row.parentNode.insertBefore(row.nextElementSibling, row);
+    }
+    refreshOrder();
+  }
+  function refreshOrder() {
+    const ids = Array.from(document.querySelectorAll('#catRows tr[data-id]'))
+                     .map(tr => tr.dataset.id);
+    const input = document.getElementById('orderInput');
+    const save = document.getElementById('saveOrderBtn');
+    if (input && save) {
+      input.value = ids.join(',');
+      save.disabled = false;
+    }
+    // Re-number the Order badges + fix arrow disabled states.
+    document.querySelectorAll('#catRows tr[data-id]').forEach((tr, i, all) => {
+      const badge = tr.querySelector('td .badge');
+      if (badge) badge.textContent = i + 1;
+      const [up, down] = tr.querySelectorAll('button.btn-outline-secondary');
+      if (up) up.disabled = (i === 0);
+      if (down) down.disabled = (i === all.length - 1);
+    });
+  }
+</script>
+{% endblock %}

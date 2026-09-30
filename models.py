@@ -358,9 +358,83 @@ def _url_host(url):
 # Link Sources (admin-managed social networks)
 # ==========================================
 
-# Category order used by the profile tabs.
+# Fallback category names used when the database has no LinkCategory rows
+# yet (fresh test DB, migrations not run). The live source of truth is the
+# link_categories table, managed via Admin -> Link Categories.
 LINK_CATEGORIES = ['Gaming & Dev', 'Content', 'Social', 'Store', 'Portfolio',
                    'Music', 'Other']
+
+
+class LinkCategory(db.Model):
+    """Admin-managed grouping buckets for link sources (profile tabs).
+
+    Sources reference a category *by name* (``LinkSource.category``) so the
+    catalogue keeps working even before this table is seeded/migrated; the
+    row here carries the presentation metadata (icon, brand colors) and the
+    ordering used by public-profile tab grouping. Deleting a category does
+    NOT cascade: sources in it fall back to the catch-all 'Other'.
+    """
+    __tablename__ = 'link_categories'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(40), unique=True, nullable=False)
+    icon_code = db.Column(db.String(50), default='tag', nullable=False)  # bi-*
+    bg_color = db.Column(db.String(9), default='#f8f9fa', nullable=False)
+    text_color = db.Column(db.String(9), default='#212529', nullable=False)
+    sort_order = db.Column(db.Integer, default=0, nullable=False)
+    is_deleted = db.Column(db.Boolean, default=False, nullable=False,
+                           server_default='0')  # soft delete (admin CRUD)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(),
+                           nullable=False)
+    updated_at = db.Column(db.DateTime, nullable=True)
+
+    DEFAULT_ICON = 'tag'
+
+    def __repr__(self):
+        return f'<LinkCategory {self.name}>'
+
+    @classmethod
+    def ordered(cls):
+        """Live categories, admin sort order first then alphabetical."""
+        return (cls.query.filter_by(is_deleted=False)
+                .order_by(cls.sort_order, cls.name).all())
+
+    @classmethod
+    def names(cls):
+        """Ordered list of live category names, or the static fallback."""
+        rows = cls.ordered()
+        if rows:
+            return [c.name for c in rows]
+        return list(LINK_CATEGORIES)
+
+    @classmethod
+    def get_by_name(cls, name):
+        if not name:
+            return None
+        return cls.query.filter_by(name=name.strip(),
+                                   is_deleted=False).first()
+
+    @classmethod
+    def seed_defaults(cls):
+        """Populate with the starter set on first run (idempotent)."""
+        if cls.query.first() is not None:
+            return
+        for idx, (name, icon, bg, txt) in enumerate(DEFAULT_LINK_CATEGORIES):
+            db.session.add(cls(name=name, icon_code=icon, bg_color=bg,
+                               text_color=txt, sort_order=idx))
+        db.session.commit()
+
+
+DEFAULT_LINK_CATEGORIES = [
+    # name, bootstrap icon (bi-* slug without prefix), bg, text
+    ('Gaming & Dev', 'controller',   '#e7f1e7', '#1e4620'),
+    ('Content',      'play-btn',     '#fdeaea', '#7a1f1f'),
+    ('Social',       'people',       '#e8f0fe', '#1a4f8b'),
+    ('Store',        'bag',          '#fff3e0', '#8a4b08'),
+    ('Portfolio',    'briefcase',    '#ede7f6', '#4527a0'),
+    ('Music',        'music-note',   '#e0f2f1', '#00695c'),
+    ('Other',        'tag',          '#f8f9fa', '#212529'),
+]
 
 DEFAULT_LINK_SOURCES = [
     # name, domains (comma-sep), bg, text, border, bootstrap icon, category
