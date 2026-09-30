@@ -329,6 +329,33 @@ def create_app(config_name=None):
 # Core Routes
 # ==========================================
 
+def _dashboard_example_link():
+    """A populated sample Link used on /dashboard to preview styling.
+
+    Built in-memory (never committed) against a real catalogue source so
+    brand colors, icon and CTA come from the same data the profile page
+    uses — if the admin edits the catalogue, the preview follows.
+    """
+    src = (LinkSource.query.filter_by(name='GitHub', is_deleted=False,
+                                      is_active=True).first()
+           or next(iter(LinkSource.active()), None))
+    demo = Link(user_id=0,
+                title='My GitHub Profile',
+                url=f'https://github.com/yourusername'
+                    if src and 'github' in (src.domains or '')
+                    else 'https://example.com/yourusername',
+                icon_code=(src.icon_code if src else 'github') or 'github',
+                category=src.category if src else 'Gaming & Dev',
+                subhandle='yourusername',
+                cta=src.cta if src and src.cta else 'Follow',
+                click_count=128,
+                is_active=True)
+    if src is not None:
+        db.session.add(demo)      # transient: lets matched_source resolve id
+        demo.source_id = src.id
+    return demo
+
+
 def register_routes(app):
 
     @app.route('/')
@@ -615,7 +642,8 @@ def register_routes(app):
                                max_upload_kb=Setting.get_int('max_upload_size_kb', 2048),
                                link_sources=LinkSource.active(),
                                link_categories=LINK_CATEGORIES,
-                               themes=PROFILE_THEMES)
+                               themes=PROFILE_THEMES,
+                               example_link=_dashboard_example_link())
 
     @app.route('/link/add', methods=['POST'])
     @login_required

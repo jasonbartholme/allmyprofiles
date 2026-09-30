@@ -1,6 +1,52 @@
 {% extends 'base.html' %}
 {% block title %}Dashboard — AllMyProfiles{% endblock %}
 
+{% block head %}
+<style>
+  /* ===== Graphical "Link Source" picker ===== */
+  .src-search { max-width: 340px; }
+  .source-picker {
+    display: grid; gap: .5rem; max-height: 268px; overflow-y: auto;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    padding: .25rem; margin-top: .5rem;
+  }
+  .source-tile { position: relative; }
+  .source-tile input[type="radio"] {
+    position: absolute; opacity: 0; pointer-events: none; margin: 0;
+  }
+  .source-tile label {
+    display: flex; align-items: center; gap: .5rem; width: 100%;
+    cursor: pointer; border-radius: .75rem; padding: .5rem .65rem;
+    font-weight: 600; line-height: 1.15; user-select: none;
+    transition: transform .1s ease, box-shadow .1s ease;
+  }
+  .source-tile label:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(30,40,90,.15); }
+  .source-tile .src-icon {
+    width: 26px; height: 26px; flex: 0 0 26px; border-radius: .5rem;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,.16);
+  }
+  .source-tile .src-icon img { width: 20px; height: 20px; object-fit: contain; }
+  .source-tile .src-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .source-tile .src-cat { font-size: .65rem; opacity: .7; font-weight: 500; display: block; }
+  .source-tile input:checked + label { outline: 3px solid #4c8dff; outline-offset: 1px; }
+  .source-tile input:checked + label::after {
+    content: '\F26A'; font-family: 'bootstrap-icons'; margin-left: auto; font-size: 1rem;
+  }
+  .source-tile input:focus-visible + label { outline: 3px solid #6a5cff; outline-offset: 1px; }
+  /* Selected-source contextual form panel */
+  .source-form {
+    border-radius: .75rem; padding: .75rem; margin-top: .5rem;
+    border: 2px dashed #dee2e6; background: #f8f9fa;
+    transition: background-color .15s ease, border-color .15s ease;
+  }
+  .source-form.active { border-style: solid; }
+  /* Inputs stay on light surfaces even when the panel takes brand colors */
+  .source-form input, .source-form select { color-scheme: light; }
+  @media (max-width: 575.98px) { .source-picker { grid-template-columns: 1fr 1fr; } }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container py-4">
   <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
@@ -37,7 +83,7 @@
             <i class="bi bi-grip-vertical text-muted drag-handle" role="button" title="Drag to reorder"></i>
             <div class="flex-grow-1 min-w-0">
               <div class="fw-semibold text-truncate">
-                <i class="bi bi-{{ link.icon_code or 'link-45deg' }} me-1"></i>{{ link.title }}
+              <i class="bi bi-{{ (link.matched_source.icon_code if link.matched_source and link.matched_source.icon_code else link.icon_code) or 'link-45deg' }} me-1"></i>{{ link.title }}
               </div>
               <div class="small text-muted text-truncate">{{ link.url }}</div>
               <div class="small"><i class="bi bi-cursor-fill me-1 text-success"></i>{{ link.click_count or 0 }} clicks</div>
@@ -65,53 +111,132 @@
         {% endif %}
       </div>
 
+      <div class="card p-4 mb-4">
+        <h5 class="fw-bold mb-1"><i class="bi bi-eye me-2"></i>Example of a populated link</h5>
+        <p class="text-muted small mb-3">This is how a finished link will appear on your public profile — brand colors, icon, handle and button label are applied automatically once you pick its network below.</p>
+        {% set ex = example_link %}
+        {% if ex %}
+        {% set exsrc = ex.matched_source %}
+        <a class="profile-link" href="#" onclick="return false;"
+           style="background:{{ ex.brand_bg }};color:{{ ex.brand_text }};border:2px solid {{ ex.brand_border }};">
+          {% if exsrc and exsrc.custom_icon_path %}
+          <img src="/uploads/{{ exsrc.custom_icon_path }}" alt="" style="width:28px;height:28px;object-fit:contain;">
+          {% else %}
+          <i class="{{ ex.brand_icon }} bi-2x"></i>
+          {% endif %}
+          <span class="flex-grow-1 text-start">
+            {{ ex.title }}
+            {% if ex.subhandle %}<small style="opacity:.75;display:block;">@{{ ex.subhandle }}</small>{% endif %}
+          </span>
+          <strong>{{ ex.cta }}</strong>
+          <i class="bi bi-box-arrow-up-right"></i>
+        </a>
+        <div class="d-flex flex-wrap gap-3 align-items-center mt-2 small text-muted">
+          <span><i class="bi bi-tag me-1"></i>Category: {{ ex.display_category }}</span>
+          <span><i class="bi bi-cursor-fill me-1 text-success"></i>{{ ex.click_count or 0 }} clicks</span>
+          <span class="fst-italic">Preview only — not clickable</span>
+        </div>
+        <style>
+          .profile-link { display:flex; align-items:center; gap:.75rem; text-decoration:none;
+                          padding:.9rem 1.25rem; border-radius:1rem; font-weight:600; }
+          .profile-link .bi-2x { font-size:1.4rem; }
+        </style>
+        {% endif %}
+      </div>
+
       <div class="card p-4">
         <h5 class="fw-bold mb-3"><i class="bi bi-plus-circle me-2"></i>Add a new link</h5>
         <form method="POST" action="{{ url_for('add_link') }}">
-          <div class="row g-3">
-            <div class="col-sm-5">
-              <input type="text" class="form-control" name="title" placeholder="Title (e.g. My YouTube)" required maxlength="120">
+          <!-- Step 1: pick the network (graphical) -->
+          <label class="form-label fw-semibold small text-uppercase text-muted mb-1"
+                 id="sourcePickerLabel">1 · Link source</label>
+          <input type="search" class="form-control form-control-sm src-search"
+                 id="sourceSearch" placeholder="Search networks…" autocomplete="off"
+                 aria-label="Search link sources">
+          <div class="source-picker" role="radiogroup" aria-labelledby="sourcePickerLabel">
+            <div class="source-tile" data-name="auto detect">
+              <input class="form-check-input" type="radio" name="source_id" id="src-auto" value="" checked>
+              <label for="src-auto" style="background:#f8f9fa;color:#212529;border:2px solid #dee2e6;">
+                <span class="src-icon"><i class="bi bi-magic"></i></span>
+                <span class="src-name">Auto-detect<span class="src-cat">from URL</span></span>
+              </label>
             </div>
-            <div class="col-sm-7">
-              <input type="url" class="form-control" name="url" placeholder="https://…" required>
+            {% for s in link_sources %}
+            <div class="source-tile" data-name="{{ s.name|lower }}">
+              <input class="form-check-input" type="radio" name="source_id"
+                     id="src-{{ s.id }}" value="{{ s.id }}"
+                     data-name="{{ s.name }}"
+                     data-bg="{{ s.bg_color }}" data-text="{{ s.text_color }}"
+                     data-icon="bi-{{ s.icon_code or 'link-45deg' }}"
+                     data-img="{{ '/uploads/' ~ s.custom_icon_path if s.custom_icon_path else '' }}"
+                     data-cta="{{ s.cta or 'Follow' }}"
+                     data-urlhint="{{ (s.profile_pattern or s.url or 'https://…')|replace('{handle}', 'username') }}"
+                     {% if s.is_adult %}data-adult="1"{% endif %}>
+              <label for="src-{{ s.id }}"
+                     style="background:{{ s.bg_color }};color:{{ s.text_color }};border:2px solid {{ s.border_color }};">
+                <span class="src-icon">
+                  {% if s.custom_icon_path %}
+                  <img src="/uploads/{{ s.custom_icon_path }}" alt="">
+                  {% else %}
+                  <i class="bi bi-{{ s.icon_code or 'link-45deg' }}"></i>
+                  {% endif %}
+                </span>
+                <span class="src-name">{{ s.name }}<span class="src-cat">{{ s.category }}{% if s.is_adult %} · 18+{% endif %}</span></span>
+              </label>
             </div>
-            <div class="col-sm-6">
-              <select class="form-select" name="source_id">
-                <option value="">Source: auto-detect from URL</option>
-                {% for s in link_sources %}
-                <option value="{{ s.id }}">{{ s.name }}{% if s.is_adult %} (18+){% endif %}</option>
-                {% endfor %}
-              </select>
-              <div class="form-text">Pick a platform to apply its brand colors &amp; icon, or leave on auto-detect.</div>
-            </div>
-            <div class="col-sm-3">
-              <input type="text" class="form-control" name="subhandle" placeholder="@handle (optional)" maxlength="80">
-            </div>
-            <div class="col-sm-3 d-grid">
-              <button type="submit" class="btn btn-primary rounded-pill">Add link</button>
-            </div>
-            <div class="col-12">
-              <details>
-                <summary class="text-muted small">Advanced (icon override, button label, UTM params)</summary>
-                <div class="row g-2 mt-1">
-                  <div class="col-sm-4">
-                    <select class="form-select form-select-sm" name="icon_code">
-                      {% set icons = ['link-45deg','globe','instagram','twitter-x','youtube','github','linkedin','facebook','tiktok','twitch','whatsapp','telegram','shop','camera-fill','mic-fill','briefcase','envelope','music-note-beamed','play-btn'] %}
-                      {% for icon in icons %}
-                      <option value="{{ icon }}" {{ 'selected' if icon == 'link-45deg' }}>{{ icon }}</option>
-                      {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-3">
-                    <input type="text" class="form-control form-control-sm" name="cta" placeholder="Button label (e.g. Follow)" maxlength="40">
-                  </div>
-                  <div class="col-sm-5">
-                    <input type="text" class="form-control form-control-sm" name="utm_params" placeholder="?utm_source=… (optional)" maxlength="300">
-                  </div>
+            {% endfor %}
+          </div>
+
+          <!-- Step 2: network-specific fields -->
+          <div class="source-form mt-3" id="sourceForm">
+            <div class="row g-2 align-items-end">
+              <div class="col-12">
+                <label class="form-label small fw-semibold mb-1" for="urlInput">2 · Profile URL <span id="srcHint" class="fw-normal text-muted"></span></label>
+                <input type="text" class="form-control" name="url" id="urlInput" placeholder="https://…" required>
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label small fw-semibold mb-1" for="titleInput">Title</label>
+                <input type="text" class="form-control" name="title" id="titleInput"
+                       placeholder="My GitHub Profile" required maxlength="120">
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label small fw-semibold mb-1" for="subhandleInput">Handle <span class="fw-normal text-muted">(this network calls it “<span id="handleTerm">handle</span>”)</span></label>
+                <input type="text" class="form-control" name="subhandle" id="subhandleInput"
+                       placeholder="@username (optional)" maxlength="80">
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label small fw-semibold mb-1" for="ctaInput">Button label</label>
+                <div class="input-group">
+                  <input type="text" class="form-control" name="cta" id="ctaInput"
+                         placeholder="Follow" maxlength="40">
+                  <button class="btn btn-outline-secondary" type="button" id="ctaDefault" title="Use this network's default label">Default</button>
                 </div>
-              </details>
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label small fw-semibold mb-1" for="utmInput">UTM params <span class="fw-normal text-muted">(optional)</span></label>
+                <input type="text" class="form-control font-monospace" name="utm_params" id="utmInput"
+                       placeholder="?utm_source=…" maxlength="300">
+              </div>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mt-2">
+              <div class="form-text mb-0" id="sourceNote">Leave on auto-detect and we’ll match the network from your URL.</div>
+              <button type="submit" class="btn btn-primary rounded-pill px-4">Add link</button>
             </div>
           </div>
+
+          <details class="mt-2">
+            <summary class="text-muted small">Advanced (icon override)</summary>
+            <div class="row g-2 mt-1">
+              <div class="col-sm-4">
+                <select class="form-select form-select-sm" name="icon_code">
+                  {% set icons = ['link-45deg','globe','instagram','twitter-x','youtube','github','linkedin','facebook','tiktok','twitch','whatsapp','telegram','shop','camera-fill','mic-fill','briefcase','envelope','music-note-beamed','play-btn'] %}
+                  {% for icon in icons %}
+                  <option value="{{ icon }}" {{ 'selected' if icon == 'link-45deg' }}>{{ icon }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </details>
         </form>
       </div>
     </div>
@@ -254,5 +379,109 @@
       }
     });
   }
+
+  // ===== Graphical Link Source picker =====
+  (() => {
+    const tiles   = [...document.querySelectorAll('.source-tile')];
+    const radios  = tiles.map(t => t.querySelector('input[type="radio"]')).filter(Boolean);
+    const search  = document.getElementById('sourceSearch');
+    const urlIn   = document.getElementById('urlInput');
+    const titleIn = document.getElementById('titleInput');
+    const subIn   = document.getElementById('subhandleInput');
+    const ctaIn   = document.getElementById('ctaInput');
+    const ctaDef  = document.getElementById('ctaDefault');
+    const note    = document.getElementById('sourceNote');
+    const hint    = document.getElementById('srcHint');
+    const term    = document.getElementById('handleTerm');
+    const form    = document.getElementById('sourceForm');
+    if (!radios.length) return;
+
+    // Different networks call the same field different things — show their
+    // own vocabulary so users recognize it instantly.
+    const HANDLE_TERMS = {
+      'GitHub': 'username', 'Steam': 'steamid64 or vanity URL',
+      'Xbox Live': 'gamertag', 'PlayStation Network': 'online ID',
+      'Discord': 'server name / invite', 'YouTube': '@channel handle',
+      'Twitch': 'channel name', 'Vimeo': 'username', 'Medium': 'username',
+      'Substack': 'publication name', 'Spotify': 'artist name',
+      'Apple Music': 'artist name', 'SoundCloud': 'username',
+      'Bandcamp': 'artist name', 'X / Twitter': 'handle',
+      'LinkedIn': 'public profile slug', 'Reddit': 'u/username',
+      'Quora': 'credential', 'Facebook': 'page or profile name',
+      'Instagram': '@username', 'TikTok': '@username', 'Threads': '@username',
+      'Patreon': 'creator page name', 'Ko-fi': 'shop username',
+      'Buy Me a Coffee': 'username', 'Etsy': 'shop name',
+      'Amazon Storefront': 'storefront name', 'Personal Website': 'domain'
+    };
+
+    function selectedRadio() {
+      return radios.find(r => r.checked) || null;
+    }
+
+    function applySource() {
+      const r = selectedRadio();
+      const name = r ? r.dataset.name : '';
+      const d = r ? r.dataset : {};
+      const termText = HANDLE_TERMS[name] || 'handle';
+
+      // URL prefix suggestion from the source's profile pattern.
+      const prefix = (d.urlhint || '').split('{')[0].replace(/\/$/, '');
+      urlIn.placeholder = prefix ? prefix + '/your-username' : 'https://…';
+      hint.textContent = name ? '· e.g. ' + (d.urlhint || '') : '';
+      titleIn.placeholder = name ? 'My ' + name + ' Profile' : 'Title (e.g. My YouTube)';
+      subIn.placeholder = '@' + (name === 'Reddit' ? 'username' : termText.replace(/^@/, '')) + ' (optional)';
+      term.textContent = termText;
+      ctaIn.placeholder = d.cta || 'Follow';
+      if (ctaDef) ctaDef.disabled = !name;
+
+      // Panel takes the network's brand colors; inputs stay on light chips.
+      const tinted = !!(name && d.bg && d.bg.toLowerCase() !== '#f8f9fa');
+      if (tinted) {
+        form.classList.add('active');
+        form.style.background = d.bg;
+        form.style.borderColor = d.text;
+        form.style.color = d.text;
+        note.innerHTML = '<strong>' + name + '</strong> selected — its brand colors, icon'
+          + (d.adult ? ' (18+)' : '') + ' and default “' + (d.cta || 'Follow') + '” label will be applied.';
+        note.style.opacity = '.85';
+      } else if (name) {
+        form.classList.add('active');
+        form.style.cssText = '';
+        form.style.borderColor = d.text || '';
+        note.innerHTML = '<strong>' + name + '</strong> selected — its brand colors, icon'
+          + (d.adult ? ' (18+)' : '') + ' and default “' + (d.cta || 'Follow') + '” label will be applied.';
+        note.style.opacity = '';
+      } else {
+        form.classList.remove('active');
+        form.style.cssText = '';
+        note.textContent = 'Leave on auto-detect and we’ll match the network from your URL.';
+        note.style.opacity = '';
+      }
+      // Light-surface inputs need dark text on bright brand panels.
+      const inputs = form.querySelectorAll('input');
+      inputs.forEach(el => { el.classList.toggle('is-on-brand', tinted); });
+    }
+
+    if (ctaDef) ctaDef.addEventListener('click', () => {
+      const r = selectedRadio();
+      if (r && r.dataset.cta) ctaIn.value = r.dataset.cta;
+    });
+
+    radios.forEach(r => r.addEventListener('change', applySource));
+
+    // Search filter over the tiles.
+    if (search) {
+      search.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        tiles.forEach(t => {
+          const hay = (t.dataset.name || '') + ' ' +
+                      (t.querySelector('.src-cat')?.textContent || '').toLowerCase();
+          t.hidden = q && !hay.includes(q);
+        });
+      });
+    }
+
+    applySource();
+  })();
 </script>
 {% endblock %}
