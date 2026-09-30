@@ -3,7 +3,11 @@
 A SaaS "link-in-bio" service — one clean, SEO/AI-optimized public page
 (`/u/<username>`, also served at the bare `/<username>`) per user, with
 click tracking, tiered link limits, an admin-to-user message inbox, a
-broken-link checker, and a full SaaS-style admin panel (metrics, activity
+broken-link checker, an **admin-managed network catalogue** (Link Sources +
+Categories) that powers a graphical add-link picker and brand-styled public
+buttons, adult-content age gates, abuse reporting with a moderation
+workbench (reports, reply macros, triage rules, saved views), contact-form
+routing into the inbox, and a full SaaS-style admin panel (metrics, activity
 audit log, impersonation, site settings).
 
 ## Stack
@@ -13,6 +17,12 @@ audit log, impersonation, site settings).
 - **Flask-Login** (sessions), **Pillow** (avatar upload processing),
   **requests** (broken-link checker)
 - **Bootstrap 5** + Bootstrap Icons + SortableJS (CDN; no build step)
+- **watchdog** pinned `>=4.0,<6.1` in `requirements.txt` — Werkzeug's
+  debug reloader imports `EVENT_TYPE_OPENED`, which very old watchdog
+  releases lack (caused `ImportError` on `python app.py`). If an
+  environment still has a stale copy, run
+  `pip install --upgrade "watchdog>=4.0,<6.1"` or use the stat-based
+  reloader (`flask run --debug --reloader-type stat`).
 - **Development database:** SQLite (zero setup, file-based)
 - **Production database:** PostgreSQL (via `DATABASE_URL`)
 
@@ -22,8 +32,10 @@ audit log, impersonation, site settings).
 app.py                  # routes: marketing site, auth, dashboard, inbox,
                         # public profiles, admin panel, static pages
 config.py               # Development / Production / Testing configs
-models.py               # User, Link, Setting, Activity, Message, MessageRead,
-                        # LinkCheckResult
+models.py               # User, Link, LinkSource, LinkCategory, Setting,
+                        # Activity, Message, MessageRead, LinkCheckResult,
+                        # ContactMessage, AbuseReport, ReplyMacro, SavedView,
+                        # TriageRule
 uploads_util.py         # image validation / re-encoding / storage helpers
 create_admin.py         # CLI: create or promote a site-admin account
 check_links.py          # cron script: broken-link checker + inbox notifs
@@ -74,12 +86,15 @@ gunicorn "app:create_app('production')" -w 4 -b 0.0.0.0:8000
 Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
 
 > **Schema changes:** development auto-creates new tables via
-> `db.create_all()`, but **production needs explicit migrations**. The inbox
-> messaging feature added three tables (`messages`, `message_reads`,
-> `link_check_results`) — before deploying, generate and apply the migration:
+> `db.create_all()`, but **production needs explicit migrations**. Recent
+> features added tables — inbox messaging (`messages`, `message_reads`,
+> `link_check_results`), the link-source catalogue (`link_sources`,
+> `link_categories`), contact messages, abuse reports, reply macros, saved
+> views, triage rules, plus new columns on `users`/`links` — before
+> deploying, generate and apply the migration:
 >
 > ```bash
-> flask db migrate -m "admin messaging / inbox"   # run once, commit the result
+> flask db migrate -m "link categories/sources, moderation"   # run once, commit the result
 > flask db upgrade                                # run on each production host
 > ```
 
@@ -91,14 +106,88 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
   ≤512 px and re-encoded as JPEG). An external avatar URL still works as a
   fallback; uploads take precedence.
 - Links manager: add / hide / delete, drag-and-drop ordering, click counts
+- **Graphical "Add a new link" picker** — instead of a plain text dropdown,
+  every network from the admin catalogue appears as one row with its icon
+  (Bootstrap icon or admin-uploaded image) and name rendered in official
+  brand colors, plus a search filter and URL auto-detect. Selecting a
+  network reveals a contextual, brand-tinted form whose fields adapt to that
+  network: handle/URL placeholders are generated from the source's profile
+  pattern (`https://github.com/{handle}`), per-network terminology
+  (gamertag, online ID, shop name…), an optional `@handle` sub-line, a
+  custom CTA label pre-filled with the network's default ("Follow",
+  "Listen", "Shop"…), and UTM tagging. The dashboard also shows a fully
+  populated example link card so users see exactly what their links will
+  look like before adding real ones.
+- Public profiles group links into **category tabs** using each network's
+  admin-defined category, style buttons with the network's brand colors and
+  icon, and mark links `rel="nofollow"` where the admin flagged them. Links
+  on networks marked **adult** are hidden behind an age-gate confirmation
+  page (`profile_agegate.html`) when the viewer hasn't confirmed.
+- **Public abuse reporting** — visitors can report a profile via `/report`
+  and `/report/<username>`; reports land in the admin moderation queue.
 - Public SEO-friendly profile page at `/u/<username>` (OG tags + JSON-LD
-  schema.org markup so pages rank in Google and parse cleanly for AI search)
+  schema.org markup so pages rank in Google and parse cleanly for AI search).
+  Machine-readable extras: `/llms.txt`, `/ai-grounding` facts page, XML
+  sitemaps (static + per-profile pages), `/robots.txt`, and a
+  `/u/<username>/links.xml` feed per profile.
 - Tiers: **Free** (default cap 3 active links), **Expanded** (10),
   **Full / Custom** (unlimited) — caps are live-editable from admin settings
 - **Inbox** (`/inbox`) — receives messages from the site admin (announcements,
-  ToS notices, personal notes, broken-link reports). Unread messages show a
-  live badge count in the navbar and on the dashboard; opening a message marks
-  it read, and messages can be archived / unarchived.
+  ToS notices, personal notes, broken-link reports) **and visitor contact
+  requests** submitted through a user's public profile (contact form /
+  `submit-contact`), each with its own thread view and archive/delete actions.
+  Unread messages show a live badge count in the navbar and on the dashboard;
+  opening a message marks it read, and messages can be archived / unarchived.
+- Profile extras: skills list, featured video embed (YouTube/Vimeo URLs are
+  parsed into safe embeds), curated theme picker (higher tiers unlock more
+  themes).
+
+## Link source catalogue (networks & categories)
+
+The look and behaviour of every link is driven by two admin-managed tables,
+seeded automatically on first run (`LinkCategory.seed_defaults()` /
+`LinkSource.seed_defaults()`, idempotent):
+
+- **`link_categories`** — grouping buckets that become tabs on public
+  profiles. Each carries presentation metadata: name, Bootstrap Icons code,
+  background/text colors, sort order. Categories are referenced *by name*
+  from sources, so the catalogue keeps working even before migration/seeding;
+  deleting a category never orphans data (see CRUD rules below).
+- **`link_sources`** — one row per network (GitHub, Steam, TikTok, Etsy, …):
+  matching domains (for URL auto-detect), example URL, `{handle}` profile
+  pattern, brand bg/text/border colors, icon (Bootstrap Icons slug or an
+  uploaded custom image under `uploads/icons/`), default CTA label, category,
+  sort order, `is_active` visibility, `is_adult` (triggers the public-page
+  age gate), `is_nofollow`, and soft-delete for recovery.
+
+Both tables support full admin CRUD with soft deletes + restore, validation
+(hex colors, icon slugs, `{handle}` patterns, bare hostnames, duplicate
+names), rename cascades, and activity-log entries.
+
+### Admin → Link Sources (`/admin/link-sources`)
+
+Create/edit/delete/restore networks; inactive sources disappear from the
+user picker but existing links keep their branding. Domain matching powers
+"paste a URL, we detect the network" in the add-link flow.
+
+### Admin → Link Categories (`/admin/link-categories`)
+
+Full CRUD designed for a catalogue spanning many niches:
+
+- **List** (`GET`) — live member-source counts per category, plus an
+  "orphans" panel showing sources whose category was deleted (re-file them).
+- **Create / Edit** (`/new`, `/<id>/edit`) — shared form template
+  (`admin/link_category_form.html`) with live preview of name/icon/colors,
+  icon-chip picker, suggested palette, sort order, and an optional
+  **"Apply to N sources"** rename cascade checkbox.
+- **Delete** (`POST /<id>/delete`) — soft delete with explicit reassignment:
+  the admin chooses which surviving category absorbs the member sources
+  (default `Other`). The catch-all **`Other` is protected** — it cannot be
+  deleted or renamed, guaranteeing every source always has a bucket.
+- **Restore** (`POST /<id>/restore`) — undeletes a category (name-collision
+  checked).
+- **Reorder** (`POST /reorder`) — persisted drag-and-drop ordering used by
+  public-profile tab grouping.
 
 ## Marketing home page (`/`)
 
@@ -128,8 +217,9 @@ served by the `home()` route):
 Supporting public routes: `/api/check-username`, `/help`, `/contact`
 (form submissions are logged as `contact_request` activity events and
 surface on the admin dashboard — no email service wired up yet),
-`/terms`, `/privacy`. Reserved usernames (e.g. `admin`, `help`, `api`)
-are blocked at registration and in the availability API.
+`/terms`, `/privacy`, `/report` + `/report/<username>` (public abuse
+reports → admin moderation queue). Reserved usernames (e.g. `admin`,
+`help`, `api`) are blocked at registration and in the availability API.
 
 ## Admin messaging & user inbox
 
@@ -198,6 +288,25 @@ Site admins (`is_admin` flag) get a SaaS-style dashboard:
   Free-tier max links (kept at **3** by default), Expanded-tier max links,
   max avatar upload size (KB), broken-link notification cooldown (days),
   site tagline
+- **Link Sources** (`/admin/link-sources`) — the network catalogue behind
+  the graphical add-link picker and brand-styled buttons: create/edit,
+  domains + `{handle}` pattern, brand colors, icon (built-in or uploaded),
+  default CTA, category, active/adult/nofollow flags, soft delete + restore
+- **Link Categories** (`/admin/link-categories`) — full CRUD on the grouping
+  buckets used for public-profile tabs: live source counts, orphan panel,
+  rename cascade, protected `Other` fallback, reassignment-on-delete,
+  restore, drag-and-drop reorder (see *Link source catalogue* above)
+- **Reports / moderation** (`/admin/reports`) — queue of public abuse
+  reports with status updates, bulk actions, and one-click "message the
+  reporter" (opens compose prefilled); triage rules auto-assign new reports
+- **Reply macros** (`/admin/macros`) — canned responses with
+  `{{placeholder}}` substitution at send time
+- **Triage rules** (`/admin/triage`) — lightweight automation applied to
+  incoming abuse reports
+- **Saved views** (`POST /admin/saved-views`) — persist filtered user-list
+  views for recurring admin workflows
+- **Audit log** (`/admin/audit`) — searchable activity history (signups,
+  tier changes, catalogue/category CRUD, impersonation, bulk actions…)
 
 Admin privileges are intentionally suspended while impersonating; logging out
 also ends any impersonation session. Every impersonation start/stop is written
