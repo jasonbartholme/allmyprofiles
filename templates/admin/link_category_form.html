@@ -12,6 +12,14 @@
 {% if v_order is none or v_order == '' %}
   {% if cat %}{% set v_order = cat.sort_order %}{% else %}{% set v_order = 0 %}{% endif %}
 {% endif %}
+{# Boolean display-control flag; defaults to FALSE for new rows. #}
+{% if 'is_adult' in form %}
+  {% set v_adult = form.get('is_adult')|bool %}
+{% elif cat %}
+  {% set v_adult = cat.is_adult|bool %}
+{% else %}
+  {% set v_adult = false %}
+{% endif %}
 
 <div class="container py-4" style="max-width: 760px;">
   <nav aria-label="breadcrumb">
@@ -109,8 +117,20 @@
         {% endfor %}
       </div>
 
-      {# ---------- Sort order + rename cascade ---------- #}
+      {# ---------- Adult flag + Sort order + rename cascade ---------- #}
       <div class="row g-3">
+        <div class="col-md-12 mb-2">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="is_adult"
+                   name="is_adult" value="on" {% if v_adult %}checked{% endif %}>
+            <label class="form-check-label fw-semibold" for="is_adult">Adults only (18+)</label>
+            <div class="form-text">
+              Display-control flag (defaults to off). Marking this category as adult lets the
+              site hide it from Free-tier users — free plans should never see adult content.
+              Linked sources inherit this flag; also used by next-phase tier features.
+            </div>
+          </div>
+        </div>
         <div class="col-md-4">
           <label for="sort_order" class="form-label fw-semibold">Sort order</label>
           <input type="number" class="form-control" id="sort_order" name="sort_order" min="0" max="999"

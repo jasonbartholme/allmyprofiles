@@ -2038,8 +2038,13 @@ def register_link_category_routes(app):
         except ValueError:
             sort_order = 0
 
+        # Display-control flag (checkbox posts 'on' when ticked). Free-tier
+        # users should not see adult content; this marks the category as
+        # 18+ so gating logic (and next-phase tier features) can hide it.
+        is_adult = bool(form.get('is_adult'))
+
         cleaned = {'name': name, 'icon_code': icon_code,
-                   'sort_order': sort_order, **colors}
+                   'sort_order': sort_order, 'is_adult': is_adult, **colors}
         return errors, cleaned
 
     @app.route('/admin/link-categories')

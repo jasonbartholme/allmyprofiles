@@ -382,6 +382,12 @@ class LinkCategory(db.Model):
     bg_color = db.Column(db.String(9), default='#f8f9fa', nullable=False)
     text_color = db.Column(db.String(9), default='#212529', nullable=False)
     sort_order = db.Column(db.Integer, default=0, nullable=False)
+    # Display-control flag for the whole category (and its linked sources).
+    # Free-tier users should not see adult content: categories marked here —
+    # or sources carrying their own ``LinkSource.is_adult`` flag — are hidden
+    # behind gating logic. Reserved for use in the next-phase tier features.
+    is_adult = db.Column(db.Boolean, default=False, nullable=False,
+                         server_default='0')
     is_deleted = db.Column(db.Boolean, default=False, nullable=False,
                            server_default='0')  # soft delete (admin CRUD)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(),
