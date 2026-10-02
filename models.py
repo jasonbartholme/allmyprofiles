@@ -28,6 +28,9 @@ DEFAULT_SETTINGS = {
     # Public directory (/directory/<source>) display rules.
     'directory_page_size': '24',      # non-featured members per page
     'directory_featured_max': '5',    # paid "featured" slots at the top
+    # Country search (/countries, /country/<iso2>) display rules.
+    'country_page_size': '24',        # profiles per country page
+    'country_sidebar_top': '10',      # "Top Countries" leaderboard size
 }
 
 
@@ -109,6 +112,14 @@ class User(UserMixin, db.Model):
     # profile (e.g. "Python, Flask, UI/UX"). Normalized/capped in app.py.
     skills = db.Column(db.String(300), nullable=True)
     location = db.Column(db.String(120), nullable=True)
+    # Normalized country derived from ``location`` at save time (see
+    # app.match_country). Two-letter ISO code for recognized countries
+    # ("US", "VA"), otherwise a slug of the free-text place name so every
+    # location still maps to exactly one bucket. Only ever used to power
+    # the public /countries search — and only for users who opted in via
+    # ``directory_visible`` (the "make my profile searchable" box).
+    country_code = db.Column(db.String(3), nullable=True, index=True)
+    country_name = db.Column(db.String(120), nullable=True)
     # Adult-oriented content flag. When True the profile renders an
     # age-gate interstitial and sends `noindex, nofollow` meta so it is
     # excluded from search/AI indexing.
