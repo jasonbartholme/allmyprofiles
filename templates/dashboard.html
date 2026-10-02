@@ -87,6 +87,33 @@
         · {{ links|selectattr('is_active')|list|length }}/{{ current_user.max_active_links }} active links
       {% endif %}
     </span>
+    {# ===== Stripe subscription controls ============================= #}
+    {% if current_user.tier == 'Free' %}
+      <div class="d-flex flex-wrap gap-2 mt-2 mt-md-0 align-self-center">
+        {% for plan in ['Expanded', 'Full'] %}
+        <form method="POST" action="{{ url_for('upgrade', tier=plan) }}">
+          <button class="btn btn-sm btn-outline-primary" type="submit"
+                  title="Subscribe to the {{ plan }} plan via Stripe">
+            <i class="bi bi-stars me-1"></i>Upgrade to {{ plan }}
+          </button>
+        </form>
+        {% endfor %}
+      </div>
+    {% elif current_user.stripe_customer_id %}
+      <form method="POST" action="{{ url_for('billing_portal') }}"
+            class="align-self-center mt-2 mt-md-0">
+        <button class="btn btn-sm btn-outline-secondary" type="submit"
+                title="Manage card, invoices or cancel — powered by Stripe">
+          <i class="bi bi-credit-card me-1"></i>Manage billing
+        </button>
+      </form>
+      {% if current_user.stripe_subscription_status %}
+      <span class="small text-muted align-self-center ms-md-2">
+        {{ current_user.stripe_subscription_status }}{% if current_user.stripe_current_period_end %}
+        · renews {{ datetime.fromtimestamp(current_user.stripe_current_period_end).strftime('%b %d, %Y') }}{% endif %}
+      </span>
+      {% endif %}
+    {% endif %}
   </div>
 
   <div class="row g-4">

@@ -13,3 +13,6 @@ psycopg[binary]>=3.1   # psycopg3 — works with postgresql+psycopg:// URLs
 # Alternative: psycopg2-binary>=2.9  (use with plain postgresql:// URLs)
 Pillow>=10.0
 requests>=2.32
+
+# Stripe — subscription billing & admin SaaS overview (stripe_billing.py)
+stripe>=12.0

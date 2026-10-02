@@ -34,6 +34,7 @@ from models import (db, User, Link, Setting, Activity, Message, MessageRead,
                     PAID_TIERS, HEX_COLOR_RE)
 from uploads_util import save_upload_image, delete_upload_image
 import catalogue_io
+import stripe_billing
 
 login_manager = LoginManager()
 login_manager.login_view = 'login'
@@ -330,6 +331,7 @@ def create_app(config_name=None):
     register_inbox_routes(app)
     register_public_interaction_routes(app)
     register_admin_routes(app)
+    register_admin_billing_routes(app)
     register_admin_message_routes(app)
     register_link_source_routes(app)
     register_link_category_routes(app)
@@ -951,6 +953,94 @@ def backfill_country_fields():
 
 
 def register_routes(app):
+
+    # ------------------------------------------------------------------
+    # Stripe billing: self-serve upgrades, customer portal, webhooks.
+    # All routes degrade gracefully when no STRIPE_SECRET_KEY is set so
+    # dev/test environments never crash before credentials are pasted in.
+    # ------------------------------------------------------------------
+
+    @app.route('/upgrade/<tier>', methods=['POST'])
+    @login_required
+    def upgrade(tier):
+        """Start a Stripe Checkout session for a paid tier."""
+        if tier not in stripe_billing.TIER_PRICES:
+            flash('That plan is not available for self-service upgrade.',
+                  'warning')
+            return redirect(url_for('dashboard'))
+        if not stripe_billing.stripe_ready():
+            flash('Billing is not configured yet — Stripe secret key missing.',
+                  'warning')
+            return redirect(url_for('dashboard'))
+        try:
+            session = stripe_billing.create_checkout_session(
+                current_user, tier, _site_base_url())
+            db.session.commit()  # persist any newly-created customer id
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.error('Stripe checkout failed: %s', exc)
+            flash(f'Could not start checkout: {exc}', 'danger')
+            return redirect(url_for('dashboard'))
+        return redirect(session.url)
+
+    @app.route('/checkout/success')
+    @login_required
+    def checkout_success():
+        """Post-checkout landing page (tier flips via webhook shortly after)."""
+        tier = request.args.get('tier') or ''
+        Activity.record('stripe_checkout_return', user=current_user,
+                        detail=f'success tier={tier}')
+        db.session.commit()
+        flash('Thanks! Your payment is processing — your plan updates '
+              'within a few seconds.', 'success')
+        return redirect(url_for('dashboard'))
+
+    @app.route('/checkout/cancel')
+    @login_required
+    def checkout_cancel():
+        Activity.record('stripe_checkout_return', user=current_user,
+                        detail='cancelled')
+        db.session.commit()
+        flash('Checkout cancelled — no charge was made.', 'info')
+        return redirect(url_for('dashboard'))
+
+    @app.route('/billing/portal', methods=['POST'])
+    @login_required
+    def billing_portal():
+        """Redirect to the Stripe customer portal (cards, cancel, invoices)."""
+        if not stripe_billing.stripe_ready():
+            flash('Billing is not configured yet.', 'warning')
+            return redirect(url_for('dashboard'))
+        try:
+            session = stripe_billing.create_portal_session(
+                current_user, _site_base_url())
+        except Exception as exc:
+            flash(str(exc), 'warning')
+            return redirect(url_for('dashboard'))
+        return redirect(session.url)
+
+    @app.route('/webhooks/stripe', methods=['POST'])
+    def stripe_webhook():
+        """Stripe -> us. Signature-verified; drives all tier changes."""
+        payload = request.get_data()          # raw bytes: required for sig check
+        sig_header = request.headers.get('Stripe-Signature', '')
+        try:
+            event = stripe_billing.construct_webhook_event(payload, sig_header)
+        except Exception as exc:
+            app.logger.warning('Rejected Stripe webhook: %s', exc)
+            abort(400)
+        try:
+            action = stripe_billing.handle_webhook_event(event)
+        except Exception as exc:
+            app.logger.exception('Stripe webhook handler failed: %s', exc)
+            db.session.rollback()
+            # 500 makes Stripe retry the delivery with backoff.
+            abort(500)
+        if action and not action.startswith(('ignored', 'skipped')):
+            etype = event.get('type') if isinstance(event, dict) else event.type
+            Activity.record('stripe_webhook', detail=f'{etype} -> {action}')
+        db.session.commit()
+        return {'status': 'ok', 'action': action}, 200
 
     @app.route('/')
     def home():
@@ -2472,7 +2562,10 @@ def register_admin_routes(app):
         editable = ['free_tier_max_links', 'expanded_tier_max_links',
                     'site_tagline', 'max_upload_size_kb',
                     'link_check_notify_days',
-                    'directory_page_size', 'directory_featured_max']
+                    'directory_page_size', 'directory_featured_max',
+                    # Stripe billing config (price IDs + portal return URL).
+                    'stripe_price_expanded', 'stripe_price_full',
+                    'stripe_customer_portal_return']
         numeric = {'free_tier_max_links', 'expanded_tier_max_links',
                    'max_upload_size_kb', 'link_check_notify_days',
                    'directory_page_size', 'directory_featured_max'}
@@ -2502,6 +2595,44 @@ def register_admin_routes(app):
     app.jinja_env.globals['is_impersonating'] = _is_impersonating
     app.jinja_env.filters['skills_list'] = normalize_skills
     app.jinja_env.globals['video_embed'] = video_embed
+
+
+# ==========================================
+# Admin Billing (Stripe SaaS overview)
+# ==========================================
+
+def register_admin_billing_routes(app):
+
+    @app.route('/admin/billing')
+    @admin_required
+    def admin_billing():
+        """SaaS overview of the Stripe account: number cards + quick links.
+
+        Cards: subscriptions created today, cleared (available) funds,
+        refunds pending processing, funds on hold, and Stripe fees for the
+        current month. Live figures come from the Stripe API; when no secret
+        key is configured the page shows setup guidance instead of erroring.
+        """
+        if not stripe_billing.stripe_ready():
+            return render_template('admin/billing.html',
+                                   stripe_ready=False, overview=None,
+                                   fmt_money=stripe_billing.fmt_money)
+        try:
+            overview = stripe_billing.collect_overview()
+        except Exception as exc:
+            app.logger.error('Stripe overview failed: %s', exc)
+            flash(f'Could not load Stripe data: {exc}', 'danger')
+            overview = None
+        # Local subscription snapshot (works even if the API call above
+        # partially failed) for the table under the cards.
+        subs = (User.query
+                .filter(User.stripe_subscription_status.isnot(None))
+                .order_by(User.tier_changed_at.desc())
+                .limit(50).all())
+        return render_template('admin/billing.html',
+                               stripe_ready=True, overview=overview,
+                               subs=subs,
+                               fmt_money=stripe_billing.fmt_money)
 
 
 # ==========================================
@@ -4007,6 +4138,7 @@ def register_template_context(app):
 
         return {
             'current_year': datetime.now().year,
+            'datetime': datetime,  # templates: period-end timestamps -> dates
             'APP_ENV': os.environ.get('FLASK_ENV', 'development'),
             'site_tagline': Setting.get('site_tagline'),
             'TIERS': TIERS,

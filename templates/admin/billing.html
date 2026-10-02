@@ -1,0 +1,147 @@
+{% extends 'base.html' %}
+{% block title %}Admin — Billing (Stripe) — AllMyProfiles{% endblock %}
+{% import 'admin/_nav.html' as dash %}
+
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <h2 class="fw-bold mb-1"><i class="bi bi-cash-coin text-success me-2"></i>Billing</h2>
+      <p class="text-muted small mb-0">SaaS overview of your Stripe account.</p>
+    </div>
+    {% if stripe_ready and overview %}
+      <span class="badge align-self-center {{ 'text-bg-success' if overview.live_mode else 'text-bg-warning' }}">
+        {{ 'Live mode' if overview.live_mode else 'Test mode' }}
+      </span>
+    {% endif %}
+  </div>
+  {{ dash.nav('billing') }}
+
+  {% if not stripe_ready %}
+  <!-- ============ Setup guidance (no secret key configured) ============ -->
+  <div class="card p-4 border-warning">
+    <h5 class="fw-bold"><i class="bi bi-plug me-2 text-warning"></i>Stripe is not connected yet</h5>
+    <p class="text-muted mb-3">Paste your credentials from the Stripe dashboard
+      (Developers → API keys) into the environment, then restart the app:</p>
+    <pre class="bg-light p-3 rounded small mb-3"># required
+STRIPE_SECRET_KEY=sk_test_xxx...        # or sk_live_... in production
+STRIPE_WEBHOOK_SECRET=whsec_xxx...      # Webhooks → your endpoint → signing secret
+# optional (Site settings can override these)
+STRIPE_PRICE_EXPANDED=price_xxx...
+STRIPE_PRICE_FULL=price_xxx...</pre>
+    <ol class="small text-muted">
+      <li>Create Products “Expanded” and “Full” with monthly recurring prices;
+          copy each <code>price_…</code> ID into Admin → Site settings.</li>
+      <li>Register a webhook endpoint at <code>/webhooks/stripe</code> for events:
+          <code>checkout.session.completed</code>, <code>customer.subscription.created/updated/deleted</code>,
+          <code>invoice.payment_failed</code>.</li>
+      <li>Local testing: <code>stripe listen --forward-to localhost:5000/webhooks/stripe</code></li>
+    </ol>
+    <a class="btn btn-outline-primary btn-sm align-self-start" href="{{ url_for('admin_settings') }}">
+      Open site settings</a>
+  </div>
+
+  {% elif overview %}
+  <!-- ===================== Number cards ===================== -->
+  <div class="row g-3 mb-4">
+    {% for label, value, sub, icon, color in [
+        ('Subscriptions today', overview.subs_today,
+         '~' ~ '{:,}'.format(overview.active_subscribers) ~ ' active subscribers', 'person-plus-fill', 'primary'),
+        ('Cleared (available)', fmt_money(overview.cleared_minor, overview.cleared_cur),
+         'settled balance ready for payout', 'bank', 'success'),
+        ('Refunding', fmt_money(overview.refunding_minor, overview.refunding_cur),
+         'refunds pending processing', 'arrow-counterclockwise', 'warning'),
+        ('On hold', fmt_money(overview.held_minor, overview.held_cur),
+         'pending & reserved funds', 'pause-circle', 'danger'),
+        ('Stripe fees (month)', fmt_money(overview.fees_minor, overview.fees_cur),
+         'on ' ~ fmt_money(overview.gross_month_minor, overview.fees_cur) ~ ' gross', 'percent', 'secondary') ] %}
+    <div class="col-6 col-lg">
+      <div class="card p-3 text-center h-100">
+        <i class="bi bi-{{ icon }} text-{{ color }} fs-3"></i>
+        <div class="fs-4 fw-bold">{{ value }}</div>
+        <div class="small text-muted">{{ label }}</div>
+        <div class="small text-muted opacity-75">{{ sub }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="small text-muted">Figures fetched live from Stripe
+    {{ overview.generated_at.strftime('%H:%M:%S') }} (cached ~1 min). Currency: {{ overview.currency }}.</p>
+
+  <!-- ===================== Quick links to Stripe ===================== -->
+  <div class="card p-3 mb-4">
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener"
+         href="https://dashboard.stripe.com/{{ '' if overview.live_mode else 'test/' }}subscriptions">
+        <i class="bi bi-arrow-up-right me-1"></i>Subscriptions</a>
+      <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener"
+         href="https://dashboard.stripe.com/{{ '' if overview.live_mode else 'test/' }}balance">
+        <i class="bi bi-arrow-up-right me-1"></i>Balance &amp; payouts</a>
+      <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener"
+         href="https://dashboard.stripe.com/{{ '' if overview.live_mode else 'test/' }}payments/refunds">
+        <i class="bi bi-arrow-up-right me-1"></i>Refunds</a>
+      <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener"
+         href="https://dashboard.stripe.com/{{ '' if overview.live_mode else 'test/' }}reports">
+        <i class="bi bi-arrow-up-right me-1"></i>Reports</a>
+      <a class="btn btn-sm btn-outline-dark" target="_blank" rel="noopener"
+         href="https://dashboard.stripe.com/{{ '' if overview.live_mode else 'test/' }}webhooks">
+        <i class="bi bi-arrow-up-right me-1"></i>Webhooks</a>
+    </div>
+  </div>
+
+  <!-- ===================== Recent subscriptions created today ===================== -->
+  {% if overview.recent_subs %}
+  <div class="card p-3 mb-4">
+    <h6 class="fw-bold mb-2">New subscriptions today</h6>
+    <table class="table table-sm mb-0 align-middle">
+      <thead><tr><th>ID</th><th>Status</th><th>Customer</th><th>Renews</th></tr></thead>
+      <tbody>
+      {% for s in overview.recent_subs %}
+        <tr>
+          <td><code class="small">{{ s.id }}</code></td>
+          <td><span class="badge text-bg-{{ 'success' if s.status in ('active','trialing') else 'secondary' }}">{{ s.status }}</span></td>
+          <td class="small">{{ s.customer }}</td>
+          <td class="small">{{ s.period_end.strftime('%Y-%m-%d') if s.period_end else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- ===================== Local subscription mirror ===================== -->
+  <div class="card p-3">
+    <h6 class="fw-bold mb-2">Accounts with Stripe billing records</h6>
+    {% if subs %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>User</th><th>Tier</th><th>Sub status</th><th>Renews</th><th>Stripe customer</th></tr></thead>
+        <tbody>
+        {% for u in subs %}
+          <tr>
+            <td><a href="{{ url_for('admin_user_detail', user_id=u.id) if false else url_for('admin_users', q=u.username) }}"
+                   class="text-decoration-none">{{ u.username }}</a></td>
+            <td><span class="badge text-bg-{{ 'dark' if u.tier != 'Free' else 'light text-dark border' }}">{{ u.tier }}</span></td>
+            <td><span class="badge text-bg-{{ 'success' if u.stripe_subscription_status in ('active','trialing')
+                       else ('warning' if u.stripe_subscription_status in ('past_due','unpaid') else 'secondary') }}">
+                 {{ u.stripe_subscription_status }}</span></td>
+            <td class="small">
+              {% if u.stripe_current_period_end %}
+                {{ datetime.fromtimestamp(u.stripe_current_period_end).strftime('%Y-%m-%d') }}
+              {% else %}—{% endif %}</td>
+            <td class="small"><code>{{ u.stripe_customer_id or '—' }}</code></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="text-muted small mb-0">No Stripe customers yet — they appear here after their first checkout.</p>
+    {% endif %}
+  </div>
+
+  {% else %}
+  <div class="alert alert-danger">Stripe could not be reached. Check your secret key and network, then reload.</div>
+  {% endif %}
+</div>
+{% endblock %}

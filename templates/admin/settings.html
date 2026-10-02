@@ -54,6 +54,30 @@
                  name="directory_featured_max" value="{{ settings.directory_featured_max }}" required>
           <div class="form-text">Paying members are slotted first, chosen at random — currently capped at <strong>5</strong>.</div>
         </div>
+
+        <div class="col-12 pt-3 border-top mt-2">
+          <h3 class="h6 fw-bold mb-0"><i class="bi bi-credit-card me-2"></i>Stripe billing</h3>
+          <div class="form-text mb-2">Recurring price IDs from your Stripe dashboard (Products → plan → Add price).
+            These override the <code>STRIPE_PRICE_*</code> env vars. See Admin → Billing for setup steps.</div>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="stripe_price_expanded">Expanded plan — Stripe price ID</label>
+          <input type="text" maxlength="64" class="form-control" id="stripe_price_expanded"
+                 name="stripe_price_expanded" value="{{ settings.stripe_price_expanded }}"
+                 placeholder="price_1AbcDeF...">
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="stripe_price_full">Full plan — Stripe price ID</label>
+          <input type="text" maxlength="64" class="form-control" id="stripe_price_full"
+                 name="stripe_price_full" value="{{ settings.stripe_price_full }}"
+                 placeholder="price_1ZyXwV...">
+        </div>
+        <div class="col-12">
+          <label class="form-label" for="stripe_customer_portal_return">Billing portal return path</label>
+          <input type="text" maxlength="200" class="form-control" id="stripe_customer_portal_return"
+                 name="stripe_customer_portal_return" value="{{ settings.stripe_customer_portal_return }}">
+          <div class="form-text">Where the Stripe customer portal sends users when they click “back to site” (default <code>/dashboard</code>).</div>
+        </div>
       </div>
       <button type="submit" class="btn btn-primary rounded-pill px-4 mt-4">Save settings</button>
     </form>
