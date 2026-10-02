@@ -31,6 +31,13 @@ DEFAULT_SETTINGS = {
     # Country search (/countries, /country/<iso2>) display rules.
     'country_page_size': '24',        # profiles per country page
     'country_sidebar_top': '10',      # "Top Countries" leaderboard size
+    # Stripe billing. Price IDs entered here override the environment
+    # variables (see config.Config.STRIPE_PRICE_*); create the prices in the
+    # Stripe dashboard (Products -> your plan -> Add price) and paste the
+    # "price_..." IDs below. Leave blank to use the env values.
+    'stripe_price_expanded': '',      # Expanded tier subscription price
+    'stripe_price_full': '',          # Full tier subscription price
+    'stripe_customer_portal_return': '/dashboard',  # portal "back to site" URL
 }
 
 
@@ -106,6 +113,20 @@ class User(UserMixin, db.Model):
     # Tiering & Monetization
     tier = db.Column(db.String(20), default='Free')  # Free, Expanded, Full, Custom
     tier_changed_at = db.Column(db.DateTime, nullable=True)
+    # --- Stripe billing identifiers -------------------------------------
+    # Populated by the checkout/webhook flow (see stripe_billing.py). The
+    # local ``tier`` is kept in sync with the subscription status so all
+    # existing tier-gated features (link limits, pinning, themes, featured
+    # slots) work unchanged: active sub -> paid tier; canceled/incomplete ->
+    # back to Free.
+    stripe_customer_id = db.Column(db.String(64), nullable=True, index=True)
+    stripe_subscription_id = db.Column(db.String(64), nullable=True)
+    # Cached subscription status ('active', 'trialing', 'past_due',
+    # 'canceled', ...) mirrored from Stripe webhooks for fast admin views.
+    stripe_subscription_status = db.Column(db.String(32), nullable=True)
+    # Unix timestamp (seconds) of the current period end, stored as int so
+    # no timezone conversion is needed at write time.
+    stripe_current_period_end = db.Column(db.BigInteger, nullable=True)
 
     # Profile extras (from Colab mockup spec)
     # Skills: short comma-separated list rendered as badges on the public

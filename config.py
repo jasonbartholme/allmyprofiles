@@ -30,6 +30,25 @@ class Config:
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
     MAX_CONTENT_LENGTH = 5 * 1024 * 1024  # hard 5 MB request-size ceiling
 
+    # --- Stripe (subscriptions & payments) --------------------------------
+    # Credentials come from the Stripe dashboard (Developers -> API keys).
+    # Leave them unset in development and the billing features degrade
+    # gracefully: upgrade buttons show a "billing not configured" notice
+    # instead of crashing, and the admin SaaS overview shows guidance.
+    #   STRIPE_SECRET_KEY      : sk_test_... / sk_live_...  (secret key)
+    #   STRIPE_WEBHOOK_SECRET  : whsec_...  (from `stripe listen` or the
+    #                            dashboard Webhooks page -> signing secret)
+    #   STRIPE_PRICE_EXPANDED  : price_... monthly price for the Expanded tier
+    #   STRIPE_PRICE_FULL      : price_... monthly price for the Full tier
+    # The price IDs can also be stored/edited as site settings
+    # (stripe_price_expanded / stripe_price_full), which take precedence —
+    # see stripe_billing.PRICE_SETTING_KEYS.
+    STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '')
+    STRIPE_PUBLISHABLE_KEY = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
+    STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+    STRIPE_PRICE_EXPANDED = os.environ.get('STRIPE_PRICE_EXPANDED', '')
+    STRIPE_PRICE_FULL = os.environ.get('STRIPE_PRICE_FULL', '')
+
 
 class DevelopmentConfig(Config):
     """SQLite for local development."""
