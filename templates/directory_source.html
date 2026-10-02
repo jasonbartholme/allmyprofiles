@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}{{ source.name }} profiles · Social Networks · {{ site_name }}{% endblock %}
+
+{% block description %}All AllMyProfiles members who list a {{ source.name }} profile.{% endblock %}
+
+{% block content %}
+<div class="py-5" style="background-color: {{ card.bg }}; border-bottom: 1px solid {{ card.border }};">
+  <div class="container">
+    <a href="{{ url_for('directory') }}" class="small text-decoration-none"
+       style="color: {{ text }};">&larr; All networks</a>
+    <div class="d-flex align-items-center gap-3 mt-3">
+      {% if source.custom_icon_path %}
+        <img src="/uploads/{{ source.custom_icon_path }}" alt=""
+             style="width:48px;height:48px;object-fit:contain;">
+      {% else %}
+        <i class="{{ card.icon }}" style="font-size: 2.5rem; color: {{ text }};"></i>
+      {% endif %}
+      <div>
+        <h1 class="h2 fw-bold mb-1" style="color: {{ text }};">
+          {{ source.name }}
+          {% if source.is_adult_effective %}<span class="badge text-bg-danger align-middle">18+</span>{% endif %}
+        </h1>
+        <p class="mb-0 small" style="color: {{ text }}; opacity:.8;">
+          {{ members | length }} member{% if members | length != 1 %}s{% endif %}
+          on this network · {{ source.category }}
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container py-5">
+  {% if members %}
+  <div class="row g-3">
+    {% for m in members %}
+    <div class="col-12 col-md-6 col-lg-4">
+      <a class="text-decoration-none"
+         href="{{ url_for('public_profile', username=m.user.username) }}">
+        <div class="card link-card h-100">
+          <div class="card-body d-flex align-items-center gap-3">
+            <img src="{{ m.user.avatar_src }}" alt="" class="avatar-sm rounded-circle border">
+            <div class="flex-grow-1 min-w-0">
+              <div class="fw-semibold text-truncate">{{ m.user.display_name }}</div>
+              <div class="small text-muted text-truncate">@{{ m.user.username }}
+                {% if m.link.subhandle %}· {{ m.link.subhandle }}{% endif %}</div>
+              {% if m.user.headline %}
+              <div class="small text-truncate">{{ m.user.headline }}</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-center py-5">
+    <i class="bi bi-person-lines-fill fs-1 text-muted"></i>
+    <h2 class="h4 mt-3">No public profiles yet</h2>
+    <p class="text-muted mb-3">Members choose whether their links appear in the directory.
+      Add your own {{ source.name }} profile and opt in from your dashboard.</p>
+    <a class="btn btn-primary rounded-pill px-4" href="{{ url_for('register') }}">Sign up free</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

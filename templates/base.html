@@ -106,6 +106,9 @@
               <a class="nav-link fw-semibold" href="{{ url_for('dashboard') }}">Dashboard</a>
             </li>
             <li class="nav-item">
+              <a class="nav-link" href="{{ url_for('directory') }}">Directory</a>
+            </li>
+            <li class="nav-item">
               <a class="nav-link position-relative" href="{{ url_for('inbox') }}">
                 <i class="bi bi-envelope me-1"></i>Inbox
                 {% if unread_count %}
@@ -124,6 +127,7 @@
               <a class="btn btn-outline-primary btn-sm rounded-pill px-3" href="{{ url_for('logout') }}">Log out</a>
             </li>
           {% else %}
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('directory') }}">Directory</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('login') }}">Log in</a></li>
             <li class="nav-item"><a class="btn btn-primary btn-sm rounded-pill px-3" href="{{ url_for('register') }}">Sign up free</a></li>
           {% endif %}
@@ -187,6 +191,7 @@
         <div class="col-6 col-lg-2">
           <h6 class="fw-bold small text-uppercase">Support</h6>
           <ul class="list-unstyled small">
+            <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('directory') }}">Social Networks</a></li>
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('help_center') }}">Help Center</a></li>
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('contact') }}">Contact Us</a></li>
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('login') }}">Log in</a></li>
