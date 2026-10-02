@@ -144,6 +144,19 @@ class User(UserMixin, db.Model):
 
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
+    def can_view_adult(self):
+        """Whether this account may see 18+ content (directory cards, etc.).
+
+        AC: a user must be logged in with at least a free account — no
+        profile creation required — and verified as 18+. Registration now
+        asserts "I am 18 or older" (see ``templates/register.html``), so new
+        accounts are verified from signup onwards; legacy accounts flip the
+        flag via the one-time age gate (/directory/age-gate,
+        /u/<username>/confirm-age). Admins bypass it so they can QA the
+        catalogue.
+        """
+        return bool(self.is_admin or self.age_verified)
+
     # Relationships
     links = db.relationship('Link', backref='owner', lazy=True,
                             cascade='all, delete-orphan')
@@ -509,6 +522,9 @@ DEFAULT_LINK_SOURCES = [
     ('Etsy',      'etsy.com',                         '#f16521', '#ffffff', '#c95119', 'shop',          'Store'),
     ('Amazon Storefront', 'amazon.com,amzn.to',       '#ff9900', '#131921', '#e08700', 'bag',           'Store'),
     ('Personal Website', '',                            '#f8f9fa', '#212529', '#dee2e6', 'globe2',      'Portfolio'),
+    # 18+ by nature — flagged in ADULT_SOURCE_NAMES so it is seeded with
+    # ``is_adult=True`` and hidden from guests / unverified accounts.
+    ('AdultWorld',  'adultworld.example',               '#4d0a0a', '#ffffff', '#2f0606', 'shield-lock', 'Other'),
 ]
 
 
@@ -562,6 +578,26 @@ class LinkSource(db.Model):
     def is_directory_excluded(self):
         """True when links from this source never appear in the directory."""
         return (self.name or '').strip() in self.NON_DIRECTORY_SOURCES
+
+    # ------------------------------------------------------------------
+    # Adult catalogue bootstrap (see "User Object Addition & Age Gate")
+    # ------------------------------------------------------------------
+    # Networks whose content is 18+ by nature. Flagged on first run so the
+    # directory gating rules have real data to enforce; admins can change
+    # any of these per-source in Admin -> Link Sources, and flag whole
+    # categories via Admin -> Link Categories (``LinkCategory.is_adult``).
+    ADULT_SOURCE_NAMES = frozenset({'AdultWorld'})
+
+    @classmethod
+    def seed_adult_flags(cls):
+        """Flag the known adult networks (idempotent, additive only)."""
+        changed = False
+        for src in cls.query.filter(cls.name.in_(cls.ADULT_SOURCE_NAMES)).all():
+            if not src.is_adult:
+                src.is_adult = True
+                changed = True
+        if changed:
+            db.session.commit()
 
     # ---------------------------------------------------------------
     # Adult / 18+ display control
@@ -637,8 +673,15 @@ class LinkSource(db.Model):
 
     @classmethod
     def seed_defaults(cls):
-        """Populate the catalogue on first run (idempotent)."""
+        """Populate the catalogue on first run (idempotent).
+
+        Sources listed in ``ADULT_SOURCE_NAMES`` are created with
+        ``is_adult=True``; on an existing database the flags are re-applied
+        so a catalogue seeded before this field existed still enforces the
+        18+ directory rules.
+        """
         if cls.query.first() is not None:
+            cls.seed_adult_flags()
             return
         for idx, (name, domains, bg, txt, brd, icon, cat) in enumerate(DEFAULT_LINK_SOURCES):
             first_domain = (domains or '').split(',')[0].strip()
@@ -649,8 +692,10 @@ class LinkSource(db.Model):
                                text_color=txt, border_color=brd,
                                icon_code=icon, category=cat,
                                sort_order=idx, url=url,
-                               profile_pattern=pattern))
+                               profile_pattern=pattern,
+                               is_adult=name in cls.ADULT_SOURCE_NAMES))
         db.session.commit()
+        cls.seed_adult_flags()
 
 
 HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')

@@ -35,6 +35,19 @@
                   {% if u.is_admin %}<span class="badge text-bg-danger">admin</span>{% endif %}
                 </div>
                 <div class="small text-muted">@{{ u.username }} · {{ u.email }}</div>
+                {# Age-verification status (User.age_verified) drives adult
+                   content access in the directory views. #}
+                <div class="small">
+                  {% if u.can_view_adult() %}
+                    <span class="badge text-bg-success-subtle text-success-emphasis border border-success-subtle">
+                      <i class="bi bi-person-check me-1"></i>18+ verified
+                    </span>
+                  {% else %}
+                    <span class="badge text-bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
+                      <i class="bi bi-person-dash me-1"></i>age not verified
+                    </span>
+                  {% endif %}
+                </div>
               </div>
             </div>
           </td>

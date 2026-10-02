@@ -503,6 +503,9 @@ def register_routes(app):
             email = (request.form.get('email') or '').strip().lower()
             password = request.form.get('password') or ''
             display_name = (request.form.get('display_name') or '').strip()
+            # Required age confirmation (18+) — persisted as User.age_verified
+            # so adult-content access controls can be enforced everywhere.
+            age_confirmed = request.form.get('age_confirmed') in ('yes', 'on', 'true', '1')
 
             errors = []
             if not username or len(username) < 3:
@@ -517,6 +520,9 @@ def register_routes(app):
                 errors.append('Please enter a valid email address.')
             if len(password) < 8:
                 errors.append('Password must be at least 8 characters.')
+            if not age_confirmed:
+                errors.append('You must confirm that you are 18 years of age'
+                              ' or older.')
 
             if errors:
                 for e in errors:
@@ -535,6 +541,9 @@ def register_routes(app):
                 username=username,
                 email=email,
                 display_name=display_name or username,
+                # Age gate: registration asserts 18+ (required checkbox), so
+                # the account is created already verified for adult content.
+                age_verified=bool(age_confirmed),
             )
             user.set_password(password)
 
@@ -544,6 +553,10 @@ def register_routes(app):
             db.session.commit()
 
             login_user(user)
+            # Mirror the assertion in the session so any view that checks the
+            # short-lived ``age_ok`` flag agrees with the stored attribute.
+            if age_confirmed:
+                session['age_ok'] = True
             flash('Account created successfully!', 'success')
             return redirect(url_for('dashboard'))
 

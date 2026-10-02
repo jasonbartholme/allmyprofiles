@@ -35,6 +35,23 @@
             <input type="password" class="form-control" id="password" name="password"
                    required minlength="8" placeholder="At least 8 characters">
           </div>
+          {# Age confirmation (required): asserts the account holder is 18+.
+             Persisted on the user record as User.age_verified so adult-content
+             access controls can be enforced across directory views. #}
+          <div class="mb-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="age_confirmed"
+                     name="age_confirmed" value="yes" required>
+              <label class="form-check-label small" for="age_confirmed">
+                I confirm that I am <strong>18 years of age or older</strong>.
+                <span class="text-danger">*</span>
+              </label>
+            </div>
+            <div class="form-text">
+              Some networks in our directory are adult-oriented and are only
+              shown to accounts verified as 18+.
+            </div>
+          </div>
           <button type="submit" class="btn btn-primary w-100 rounded-pill py-2">Sign up free</button>
         </form>
 
