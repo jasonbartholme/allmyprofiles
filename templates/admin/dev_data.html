@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}Admin · Dev data — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 860px">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <h2 class="fw-bold mb-1"><i class="bi bi-database-add text-info me-2"></i>Dev data</h2>
+      <p class="text-muted small mb-0">Load dummy users, links and messages so the directory,
+        country search and dashboards have realistic content while developing.</p>
+    </div>
+    <span class="badge align-self-center text-bg-warning">Development only</span>
+  </div>
+  {{ dash.nav('dev-data') }}
+
+  <div class="card p-3 mb-4 bg-light border-0">
+    <div class="row row-cols-2 row-cols-md-4 g-3 text-center">
+      <div><div class="fs-4 fw-bold">{{ status.users }}</div><div class="small text-muted">demo users</div></div>
+      <div><div class="fs-4 fw-bold">{{ status.links }}</div><div class="small text-muted">demo links</div></div>
+      <div><div class="fs-4 fw-bold">{{ status.opted_in }}</div><div class="small text-muted">directory-visible</div></div>
+      <div><div class="fs-4 fw-bold">{{ status.countries }}</div><div class="small text-muted">country buckets</div></div>
+    </div>
+  </div>
+
+  <div class="card p-4 mb-4">
+    <h3 class="h5 fw-bold mb-1"><i class="bi bi-magic me-2"></i>Load dummy data</h3>
+    <p class="text-muted small">Creates accounts <code>demo_001 … demo_NNN</code> with profiles spread across
+      real countries (including the Vatican City edge case), 1–4 network links each with random click counts,
+      a mix of Free/Expanded/Full tiers, an adult category + source for testing the 18+ gate, and a few inbox
+      messages. Re-running with the same size skips existing rows — it won’t duplicate.</p>
+    <form method="POST" action="{{ url_for('admin_dev_data_seed') }}" class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label small mb-1" for="count">Number of users</label>
+        <input type="number" class="form-control" id="count" name="count" value="25" min="1" max="500" style="width: 120px">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1" for="seed">Random seed <span class="text-muted">(optional)</span></label>
+        <input type="text" class="form-control" id="seed" name="seed" placeholder="e.g. 42" style="width: 140px">
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary rounded-pill px-4">
+          <i class="bi bi-download me-1"></i>Load demo data</button>
+      </div>
+    </form>
+    <p class="small text-muted mt-3 mb-0">
+      Every demo account shares this password so you can log in as any of them to test user views:
+      <code>{{ status.password }}</code>
+    </p>
+  </div>
+
+  <div class="card p-4">
+    <h3 class="h5 fw-bold mb-1"><i class="bi bi-eraser me-2"></i>Wipe demo data</h3>
+    <p class="text-muted small">Deletes only rows tagged as demo (users, their links, seeded messages and audit
+      entries). Real accounts are never touched.</p>
+    {% if status.users %}
+    <form method="POST" action="{{ url_for('admin_dev_data_wipe') }}"
+          onsubmit="return confirm('Remove all {{ status.users }} demo users and their content?');">
+      <button type="submit" class="btn btn-outline-danger rounded-pill px-4">
+        <i class="bi bi-trash me-1"></i>Wipe {{ status.users }} demo users</button>
+    </form>
+    {% else %}
+    <span class="badge text-bg-secondary">Nothing to wipe yet</span>
+    {% endif %}
+  </div>
+
+  <p class="text-muted small mt-3">
+    Tip: after loading data, check <a href="{{ url_for('countries') }}">/countries</a>,
+    <a href="{{ url_for('directory') }}">/directory</a> and the admin
+    <a href="{{ url_for('admin_users') }}">Users</a> list. This page and its routes 404 outside development mode.
+  </p>
+</div>
+{% endblock %}

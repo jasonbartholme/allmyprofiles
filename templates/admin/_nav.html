@@ -20,6 +20,10 @@
     <i class="bi bi-journal-text me-1"></i>Audit log</a></li>
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='billing' }}" href="{{ url_for('admin_billing') }}">
     <i class="bi bi-cash-coin me-1"></i>Billing</a></li>
+  {% if dev_mode() %}
+  <li class="nav-item"><a class="nav-link {{ 'active' if active=='dev-data' }}" href="{{ url_for('admin_dev_data') }}">
+    <i class="bi bi-database-add me-1"></i>Dev data</a></li>
+  {% endif %}
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='settings' }}" href="{{ url_for('admin_settings') }}">
     <i class="bi bi-gear me-1"></i>Site settings</a></li>
 </ul>

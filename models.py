@@ -31,6 +31,10 @@ DEFAULT_SETTINGS = {
     # Country search (/countries, /country/<iso2>) display rules.
     'country_page_size': '24',        # profiles per country page
     'country_sidebar_top': '10',      # "Top Countries" leaderboard size
+    # Show buckets for locations that don't resolve to a real country
+    # (e.g. "Springfield"). Off by default: only genuine countries with
+    # opted-in searchable profiles appear on /countries.
+    'country_show_unrecognized': 'false',
     # Stripe billing. Price IDs entered here override the environment
     # variables (see config.Config.STRIPE_PRICE_*); create the prices in the
     # Stripe dashboard (Products -> your plan -> Add price) and paste the
@@ -68,6 +72,12 @@ class Setting(db.Model):
             return int(cls.get(key, str(fallback)))
         except (TypeError, ValueError):
             return fallback
+
+    @classmethod
+    def get_bool(cls, key, fallback=False):
+        """Truthy values: 'true'/'1'/'yes'/'on' (case-insensitive)."""
+        raw = (cls.get(key, 'true' if fallback else 'false') or '').strip()
+        return raw.lower() in ('1', 'true', 'yes', 'on')
 
     @classmethod
     def set_value(cls, key, value):
@@ -183,6 +193,11 @@ class User(UserMixin, db.Model):
     # without changing anyone's billing tier.
     is_featured = db.Column(db.Boolean, default=False, nullable=False,
                             server_default='0')
+    # Marks rows created by the dev-only dummy-data seeder (see dev_seed.py
+    # and Admin → Dev data). Never set for real signups; lets the seeder
+    # wipe exactly what it created. Added to _ensure_schema() ALTERs too.
+    is_demo = db.Column(db.Boolean, default=False, nullable=False,
+                        server_default='0')
 
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
