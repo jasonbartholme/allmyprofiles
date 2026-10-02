@@ -135,6 +135,12 @@ class User(UserMixin, db.Model):
     # directory regardless of this flag (see LinkSource.is_directory_excluded).
     directory_visible = db.Column(db.Boolean, default=False, nullable=False,
                                   server_default='0')
+    # Set once a logged-in user passes the 18+ age gate (see /directory and
+    # /u/<username>/confirm-age). Remembers verification per account so the
+    # gate is not re-shown on every device session; the session flag
+    # ``age_ok`` remains the short-lived, cookie-based equivalent.
+    age_verified = db.Column(db.Boolean, default=False, nullable=False,
+                             server_default='0')
 
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
@@ -557,11 +563,41 @@ class LinkSource(db.Model):
         """True when links from this source never appear in the directory."""
         return (self.name or '').strip() in self.NON_DIRECTORY_SOURCES
 
+    # ---------------------------------------------------------------
+    # Adult / 18+ display control
+    # ---------------------------------------------------------------
+    # A source counts as adult when it is flagged directly (``is_adult``,
+    # admin-managed per source) OR when its LinkCategory is flagged
+    # ``is_adult`` (see the previous story's category-level field). The
+    # public /directory hides those cards from logged-out visitors and
+    # from logged-in users who have not been verified as 18+.
+    @property
+    def is_adult_effective(self):
+        """True when this source must be treated as adult content."""
+        if self.is_adult:
+            return True
+        cat = LinkCategory.get_by_name(self.category)
+        return bool(cat and cat.is_adult)
+
     @classmethod
-    def directory_source_ids(cls):
-        """Ids of live sources that *are* allowed in the directory."""
-        return [r.id for r in cls.query.filter_by(is_deleted=False,
-                                                  is_active=True).all()
+    def visible_to(cls, include_adult):
+        """Live sources for public listings; adult ones only if allowed."""
+        out = []
+        for src in cls.active():
+            if src.is_adult_effective and not include_adult:
+                continue
+            out.append(src)
+        return out
+
+    @classmethod
+    def directory_source_ids(cls, include_adult=False):
+        """Ids of live sources that *are* allowed in the directory.
+
+        Personal-website sources are always dropped; adult sources are only
+        included when ``include_adult`` is true (i.e. the viewer has been
+        verified as 18+).
+        """
+        return [r.id for r in cls.visible_to(include_adult)
                 if not r.is_directory_excluded]
 
     @classmethod
