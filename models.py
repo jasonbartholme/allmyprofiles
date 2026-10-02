@@ -25,6 +25,9 @@ DEFAULT_SETTINGS = {
     # Broken-link notification spam guard: minimum days between reports
     # about the *same* still-broken link set (used by check_links.py).
     'link_check_notify_days': '7',
+    # Public directory (/directory/<source>) display rules.
+    'directory_page_size': '24',      # non-featured members per page
+    'directory_featured_max': '5',    # paid "featured" slots at the top
 }
 
 
@@ -141,6 +144,13 @@ class User(UserMixin, db.Model):
     # ``age_ok`` remains the short-lived, cookie-based equivalent.
     age_verified = db.Column(db.Boolean, default=False, nullable=False,
                              server_default='0')
+    # Featured-slot placement on the public directory pages. Paid users are
+    # slotted at the top of /directory/<source> results (max N shown, chosen
+    # at random — see Setting 'directory_featured_max'). Admins can pin a
+    # free-tier account into the featured slots or suppress a paying account
+    # without changing anyone's billing tier.
+    is_featured = db.Column(db.Boolean, default=False, nullable=False,
+                            server_default='0')
 
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
@@ -392,6 +402,53 @@ class Link(db.Model):
                 and '<' not in u and ' ' not in u:
             return u
         return ''
+
+    # ------------------------------------------------------------------
+    # Directory detail cards (/directory/<source>)
+    # ------------------------------------------------------------------
+    @property
+    def network_profile_url(self):
+        """The member's profile URL on the network, cleaned for display.
+
+        Stored URLs sometimes carry tracking junk or a trailing slash; we
+        normalise scheme/host case and append the link's own UTM params when
+        present (they are the owner's chosen attribution).
+        """
+        from urllib.parse import urlsplit, urlunsplit
+        raw = (self.url or '').strip()
+        if not raw:
+            return '#'
+        if '://' not in raw:
+            raw = 'https://' + raw
+        try:
+            parts = urlsplit(raw)
+        except ValueError:
+            return raw
+        netloc = (parts.hostname or '').lower()
+        if parts.port:
+            netloc = f'{netloc}:{parts.port}'
+        path = parts.path.rstrip('/') or '/'
+        query = parts.query
+        utm = self.safe_utm
+        if utm:
+            sep = '&' if query else ''
+            query = f'{query}{sep}{utm.lstrip("?")}'
+        return urlunsplit((parts.scheme.lower() or 'https', netloc, path,
+                           query, parts.fragment))
+
+    @property
+    def network_handle(self):
+        """Best-effort '@handle' for directory cards (subhandle or last path
+        segment of the network profile URL)."""
+        sh = (self.subhandle or '').strip()
+        if sh:
+            return sh if sh.startswith('@') else '@' + sh.lstrip('u/')
+        from urllib.parse import urlsplit
+        try:
+            path = urlsplit(self.network_profile_url).path.strip('/')
+        except ValueError:
+            return ''
+        return path.split('/')[-1] if path else ''
 
 
 def _url_host(url):

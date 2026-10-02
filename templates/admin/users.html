@@ -47,6 +47,14 @@
                       <i class="bi bi-person-dash me-1"></i>age not verified
                     </span>
                   {% endif %}
+                  {# Directory featured-slot pin (User.is_featured): lets an
+                     admin place a free account in the top "featured" slots of
+                     /directory/<source>, or leave paying accounts as-is. #}
+                  {% if u.is_featured %}
+                    <span class="badge text-bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                      <i class="bi bi-star-fill me-1"></i>featured
+                    </span>
+                  {% endif %}
                 </div>
               </div>
             </div>
@@ -80,6 +88,12 @@
                 <button class="btn btn-sm {{ 'btn-danger' if u.is_admin else 'btn-outline-dark' }}"
                         title="{{ 'Revoke' if u.is_admin else 'Grant' }} admin">
                   <i class="bi bi-shield{{ '-check' if u.is_admin else '' }}"></i></button>
+              </form>
+              <form method="POST" action="{{ url_for('admin_toggle_flag', user_id=u.id) }}">
+                <input type="hidden" name="flag" value="is_featured">
+                <button class="btn btn-sm {{ 'btn-warning' if u.is_featured else 'btn-outline-warning' }}"
+                        title="{{ 'Remove from' if u.is_featured else 'Add to' }} directory featured slots">
+                  <i class="bi bi-star{{ '-fill' if u.is_featured else '' }}"></i></button>
               </form>
             </div>
           </td>

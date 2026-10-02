@@ -38,6 +38,22 @@
           <input type="text" maxlength="200" class="form-control" id="site_tagline"
                  name="site_tagline" value="{{ settings.site_tagline }}">
         </div>
+        <div class="col-12 pt-3 border-top mt-2">
+          <h3 class="h6 fw-bold mb-0"><i class="bi bi-diagram-3 me-2"></i>Public directory (<code>/directory</code>)</h3>
+          <div class="form-text mb-2">Controls how Link Source detail pages list member profiles.</div>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="directory_page_size">Directory page size (profiles per page)</label>
+          <input type="number" min="1" max="200" class="form-control" id="directory_page_size"
+                 name="directory_page_size" value="{{ settings.directory_page_size }}" required>
+          <div class="form-text">Applies to the alphabetical (non-paying) section of each network page.</div>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="directory_featured_max">Featured slots at top (max paying users)</label>
+          <input type="number" min="0" max="20" class="form-control" id="directory_featured_max"
+                 name="directory_featured_max" value="{{ settings.directory_featured_max }}" required>
+          <div class="form-text">Paying members are slotted first, chosen at random — currently capped at <strong>5</strong>.</div>
+        </div>
       </div>
       <button type="submit" class="btn btn-primary rounded-pill px-4 mt-4">Save settings</button>
     </form>
