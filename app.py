@@ -13,6 +13,7 @@ Run in production (PostgreSQL):
 
 import json
 import os
+import random
 import re
 from datetime import datetime, timedelta
 
@@ -964,33 +965,125 @@ def register_routes(app):
             flash('Adult networks are now visible.', 'success')
         return redirect(url_for('directory'))
 
+    # ------------------------------------------------------------------
+    # Link Source detail page (/directory/<slug>)
+    # ------------------------------------------------------------------
+    # Lists the member profiles associated with one network. Ordering rules:
+    #   1. Paying users (any PAID_TIERS account, or an admin-pinned
+    #      ``User.is_featured`` account) occupy the "featured" slots at the
+    #      top — at most Setting('directory_featured_max', default 5) of
+    #      them, chosen at random on every request.
+    #   2. Everyone else is listed alphabetically by display name, paginated
+    #      with the admin-configurable Setting('directory_page_size').
+    # Card contents (name, avatar thumbnail, external network-profile link,
+    # and an "AMP Profile" link to the local site profile) are rendered by
+    # templates/directory_source.html from the dicts built below.
+    # ------------------------------------------------------------------
+
+    DIRECTORY_FEATURED_MAX_DEFAULT = 5
+    DIRECTORY_PAGE_SIZE_DEFAULT = 24
+
+    def _directory_settings():
+        """Admin-tunable directory display settings (clamped, safe)."""
+        per_page = Setting.get_int('directory_page_size',
+                                   DIRECTORY_PAGE_SIZE_DEFAULT)
+        featured_max = Setting.get_int('directory_featured_max',
+                                       DIRECTORY_FEATURED_MAX_DEFAULT)
+        return max(1, min(per_page, 200)), max(0, min(featured_max, 20))
+
+    def _directory_profile_rows(src, member_ids):
+        """One row per opted-in member who lists an active link on ``src``.
+
+        Returns dicts carrying the user, their representative link for this
+        network, and the tier info needed for featured/alphabetical split.
+        """
+        rows = (Link.query
+                .filter(Link.source_id == src.id,
+                        Link.is_active.is_(True),
+                        Link.user_id.in_(member_ids or {-1}))
+                .all())
+        seen, out = set(), []
+        for link in rows:
+            owner = link.owner
+            if owner is None or owner.id in seen:
+                continue
+            # Prefer the link whose URL host actually matches this source so
+            # the card's external link points at the right network profile.
+            best = link
+            for other in rows:
+                if other.user_id != owner.id:
+                    continue
+                if (other.matched_source is not None
+                        and other.matched_source.id == src.id
+                        and best.matched_source is None):
+                    best = other
+            seen.add(owner.id)
+            out.append({
+                'user': owner,
+                'link': best,
+                'paid': owner.tier in PAID_TIERS,
+                'featured': bool(getattr(owner, 'is_featured', False)),
+            })
+        # Collapse duplicates defensively (one entry per member).
+        deduped, done = [], set()
+        for row in out:
+            if row['user'].id in done:
+                continue
+            done.add(row['user'].id)
+            deduped.append(row)
+        return deduped
+
     @app.route('/directory/<path:source_name>')
     def directory_source(source_name):
-        """Member listing for one directory source (phase 2 of the story)."""
+        """Member listing / Link Source detail page."""
         include_adult = directory_adult_ok()
         slug = (source_name or '').strip().lower()
         src = next((s for s in LinkSource.visible_to(include_adult)
                     if source_slug(s.name) == slug), None)
         if src is None or src.is_directory_excluded:
             abort(404)
+
+        per_page, featured_max = _directory_settings()
         member_ids = _directory_member_ids(include_adult)
-        rows = (Link.query
-                .filter(Link.source_id == src.id,
-                        Link.is_active.is_(True),
-                        Link.user_id.in_(member_ids or {-1}))
-                .order_by(Link.click_count.desc(), Link.created_at.desc())
-                .limit(200).all())
-        seen, members = set(), []
-        for link in rows:
-            owner = link.owner
-            if owner is None or owner.id in seen:
-                continue
-            seen.add(owner.id)
-            members.append({'user': owner, 'link': link})
-        return render_template('directory_source.html', source=src,
-                               members=members, card=_directory_card(src, member_ids),
-                               text=readable_text_color(src.bg_color, src.text_color),
-                               include_adult=include_adult)
+        rows = _directory_profile_rows(src, member_ids)
+
+        # 1) Featured: paying accounts (+ admin-pinned ones), max N at random.
+        pool = [r for r in rows if r['paid'] or r['featured']]
+        random.shuffle(pool)
+        featured = pool[:featured_max]
+        featured_ids = {r['user'].id for r in featured}
+
+        # 2) The rest alphabetically by display name (username breaks ties).
+        rest = sorted((r for r in rows if r['user'].id not in featured_ids),
+                      key=lambda r: ((r['user'].display_name or
+                                       r['user'].username).casefold(),
+                                      r['user'].username))
+
+        total_pages = max(1, -(-len(rest) // per_page))
+        try:
+            page = int(request.args.get('page', 1))
+        except (TypeError, ValueError):
+            page = 1
+        page = min(max(1, page), total_pages)
+        start = (page - 1) * per_page
+        members = rest[start:start + per_page]
+
+        return render_template(
+            'directory_source.html',
+            source=src,
+            card=_directory_card(src, member_ids),
+            text=readable_text_color(src.bg_color, src.text_color),
+            site_name='AllMyProfiles',
+            featured=featured,
+            members=members,
+            page=page,
+            total_pages=total_pages,
+            total_members=len(rows),
+            total_rest=len(rest),
+            per_page=per_page,
+            include_adult=include_adult,
+            page_args={'page': page} if page != 1 else {},
+        )
 
     # Convenience alias so bare /<username> also works (kept last so it
     # never shadows the routes above).
@@ -1635,13 +1728,25 @@ def register_admin_routes(app):
         if real and user.id == real.id:
             flash("You can't change your own admin flag.", 'warning')
             return redirect(url_for('admin_users'))
-        flag = request.form.get('flag')  # 'is_admin'
+        flag = request.form.get('flag')  # 'is_admin' | 'is_featured'
         if flag == 'is_admin':
             user.is_admin = not user.is_admin
             Activity.record('admin_flag_change', user=user, actor=real,
                             detail='granted' if user.is_admin else 'revoked')
             db.session.commit()
             flash('User updated.', 'success')
+        elif flag == 'is_featured':
+            # Manual override for the /directory/<source> featured slots.
+            # Paying accounts already get featured placement automatically;
+            # this pin lets admins feature a free account (or hide one that
+            # is opted out of the directory anyway).
+            user.is_featured = not bool(getattr(user, 'is_featured', False))
+            Activity.record('admin_flag_change', user=user, actor=real,
+                            detail='featured' if user.is_featured
+                                   else 'unfeatured')
+            db.session.commit()
+            flash(f'{user.username}: directory featured '
+                  f'{"on" if user.is_featured else "off"}.', 'success')
         else:
             flash('Unknown flag.', 'danger')
         return redirect(request.referrer or url_for('admin_users'))
@@ -1682,9 +1787,11 @@ def register_admin_routes(app):
     def admin_settings():
         editable = ['free_tier_max_links', 'expanded_tier_max_links',
                     'site_tagline', 'max_upload_size_kb',
-                    'link_check_notify_days']
+                    'link_check_notify_days',
+                    'directory_page_size', 'directory_featured_max']
         numeric = {'free_tier_max_links', 'expanded_tier_max_links',
-                   'max_upload_size_kb', 'link_check_notify_days'}
+                   'max_upload_size_kb', 'link_check_notify_days',
+                   'directory_page_size', 'directory_featured_max'}
         if request.method == 'POST':
             for key in editable:
                 value = request.form.get(key)
