@@ -1650,7 +1650,6 @@ def register_routes(app):
                                other_countries=other,
                                include_adult=include_adult)
 
-    # ------------------------------------------------------------------
     # Link Source detail page (/directory/<slug>)
     # ------------------------------------------------------------------
     # Lists the member profiles associated with one network. Ordering rules:
@@ -4021,6 +4020,7 @@ def register_template_context(app):
             # Country search helpers (templates render flag emoji + slugs).
             'country_slug': country_slug,
             'flag_emoji': flag_emoji,
+
         }
 
 
