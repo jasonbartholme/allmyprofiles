@@ -331,6 +331,7 @@ def create_app(config_name=None):
     register_inbox_routes(app)
     register_public_interaction_routes(app)
     register_admin_routes(app)
+    register_admin_devdata_routes(app)
     register_admin_billing_routes(app)
     register_admin_message_routes(app)
     register_link_source_routes(app)
@@ -926,6 +927,12 @@ def country_buckets(include_adult):
                 'members': int(r[2]),
                 'flag': flag_emoji(r[0])}
                for r in rows if r[2]]
+    # Locations that didn't resolve to a real country end up in lowercase
+    # slug buckets (e.g. "Springfield" -> 'sp'). Hide them by default so
+    # /countries only ever shows genuine countries with searchable members;
+    # admins can flip the 'country_show_unrecognized' site setting on.
+    if not Setting.get_bool('country_show_unrecognized', False):
+        buckets = [b for b in buckets if b['flag'] is not None]
     buckets.sort(key=lambda b: (b['name'] or '').casefold())
     return buckets
 
@@ -2563,14 +2570,21 @@ def register_admin_routes(app):
                     'site_tagline', 'max_upload_size_kb',
                     'link_check_notify_days',
                     'directory_page_size', 'directory_featured_max',
+                    'country_page_size', 'country_sidebar_top',
                     # Stripe billing config (price IDs + portal return URL).
                     'stripe_price_expanded', 'stripe_price_full',
                     'stripe_customer_portal_return']
         numeric = {'free_tier_max_links', 'expanded_tier_max_links',
                    'max_upload_size_kb', 'link_check_notify_days',
-                   'directory_page_size', 'directory_featured_max'}
+                   'directory_page_size', 'directory_featured_max',
+                   'country_page_size', 'country_sidebar_top'}
+        booleans = {'country_show_unrecognized'}
         if request.method == 'POST':
             for key in editable:
+                if key in booleans:
+                    Setting.set_value(key,
+                                      'true' if request.form.get(key) else 'false')
+                    continue
                 value = request.form.get(key)
                 if value is None:
                     continue
@@ -2595,6 +2609,79 @@ def register_admin_routes(app):
     app.jinja_env.globals['is_impersonating'] = _is_impersonating
     app.jinja_env.filters['skills_list'] = normalize_skills
     app.jinja_env.globals['video_embed'] = video_embed
+
+
+# ==========================================
+# Admin Dev Data (dummy user loader, development only)
+# ==========================================
+
+def register_admin_devdata_routes(app):
+    """One-click dummy dataset for local development.
+
+    The whole section is hidden from the admin UI unless the app runs in
+    development mode (``app.debug`` or FLASK_ENV=development), and the
+    seeder itself re-checks the environment before touching the database.
+    ``dev_mode`` is exposed as a Jinja global so templates can gate links
+    without importing app internals.
+    """
+
+    def _dev_mode():
+        return bool(app.debug or os.environ.get('FLASK_ENV', '') == 'development')
+
+    app.jinja_env.globals['dev_mode'] = _dev_mode
+
+    @app.route('/admin/dev-data')
+    @admin_required
+    def admin_dev_data():
+        if not _dev_mode():
+            abort(404)
+        import dev_seed
+        status = dev_seed.seed_status()
+        return render_template('admin/dev_data.html', status=status,
+                               dev_mode=True)
+
+    @app.route('/admin/dev-data/seed', methods=['POST'])
+    @admin_required
+    def admin_dev_data_seed():
+        if not _dev_mode():
+            abort(404)
+        import dev_seed
+        try:
+            count = max(1, min(int(request.form.get('count') or 25), 500))
+            seed_val = (request.form.get('seed') or '').strip()
+            summary = dev_seed.seed_dummy_data(
+                count=count, seed=seed_val or None)
+        except RuntimeError as exc:
+            flash(str(exc), 'danger')
+            return redirect(url_for('admin_dashboard'))
+        Activity.record('dev_seed_batch', actor=_real_admin(),
+                        detail=f'seeded {summary["created"]} demo users')
+        db.session.commit()
+        flash(f'Demo data loaded: {summary["created"]} users created, '
+              f'{summary["skipped"]} already existed, {summary["links"]} '
+              f'links total, {summary["messages"]} messages sent. '
+              f'Password for every demo account: "{dev_seed.DEMO_PASSWORD}"',
+              'success')
+        return redirect(url_for('admin_dev_data'))
+
+    @app.route('/admin/dev-data/wipe', methods=['POST'])
+    @admin_required
+    def admin_dev_data_wipe():
+        if not _dev_mode():
+            abort(404)
+        import dev_seed
+        try:
+            summary = dev_seed.wipe_dummy_data()
+        except RuntimeError as exc:
+            flash(str(exc), 'danger')
+            return redirect(url_for('admin_dashboard'))
+        Activity.record('dev_seed_wipe', actor=_real_admin(),
+                        detail=f'removed {summary["users"]} demo users')
+        db.session.commit()
+        flash(f'Demo data wiped: {summary["users"]} users, '
+              f'{summary["links"]} links, {summary["messages"]} messages, '
+              f'{summary["activities"]} audit entries removed.', 'info')
+        return redirect(url_for('admin_dev_data'))
 
 
 # ==========================================
