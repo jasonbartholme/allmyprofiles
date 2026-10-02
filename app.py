@@ -320,6 +320,9 @@ def create_app(config_name=None):
             Setting.seed_defaults()
             LinkSource.seed_defaults()
             LinkCategory.seed_defaults()
+            # One-time-ish backfill so pre-existing locations get country
+            # buckets (idempotent; cheap on dev DBs).
+            backfill_country_fields()
 
     register_routes(app)
     register_static_pages(app)
@@ -438,6 +441,513 @@ def directory_adult_ok():
     if getattr(current_user, 'is_admin', False):
         return True
     return bool(session.get('age_ok') or getattr(current_user, 'age_verified', False))
+
+
+# ---------------------------------------------------------------------------
+# Country resolution for the public /countries search
+# ---------------------------------------------------------------------------
+# Users type a free-form "Location" on their dashboard ("Berlin", "Germany",
+# "Nairobi, KE", ...). At save time we normalize it into exactly one country
+# bucket (see ``apply_country_fields``) so the country pages never end up
+# with near-duplicate tiles. Recognition is data-driven: the ISO 3166 table
+# below is generated from pycountry when it is installed and otherwise falls
+# back to a curated list of common names — no hard dependency either way.
+
+_ISO3166 = {
+    # alpha-2: (official English name, [common aliases])
+    'AD': ('Andorra', []),
+    'AE': ('United Arab Emirates', ['UAE', 'Emirates']),
+    'AF': ('Afghanistan', []),
+    'AG': ('Antigua and Barbuda', []),
+    'AI': ('Anguilla', []),
+    'AL': ('Albania', []),
+    'AM': ('Armenia', []),
+    'AO': ('Angola', []),
+    'AQ': ('Antarctica', []),
+    'AR': ('Argentina', []),
+    'AS': ('American Samoa', []),
+    'AT': ('Austria', []),
+    'AU': ('Australia', ['Oz']),
+    'AW': ('Aruba', []),
+    'AX': ('Åland Islands', []),
+    'AZ': ('Azerbaijan', []),
+    'BA': ('Bosnia and Herzegovina', ['Bosnia']),
+    'BB': ('Barbados', []),
+    'BD': ('Bangladesh', []),
+    'BE': ('Belgium', []),
+    'BF': ('Burkina Faso', []),
+    'BG': ('Bulgaria', []),
+    'BH': ('Bahrain', []),
+    'BI': ('Burundi', []),
+    'BJ': ('Benin', []),
+    'BL': ('Saint Barthélemy', []),
+    'BM': ('Bermuda', []),
+    'BN': ('Brunei', ['Brunei Darussalam']),
+    'BO': ('Bolivia', ['Bolivia, Plurinational State of']),
+    'BQ': ('Caribbean Netherlands', []),
+    'BR': ('Brazil', ['Brasil']),
+    'BS': ('Bahamas', ['The Bahamas']),
+    'BT': ('Bhutan', []),
+    'BV': ('Bouvet Island', []),
+    'BW': ('Botswana', []),
+    'BY': ('Belarus', []),
+    'BZ': ('Belize', []),
+    'CA': ('Canada', []),
+    'CC': ('Cocos (Keeling) Islands', []),
+    'CD': ('DR Congo', ['Congo (Kinshasa)', 'Democratic Republic of the Congo',
+                        'Democratic Republic of Congo', 'Congo-Kinshasa', 'DRC']),
+    'CF': ('Central African Republic', ['CAR']),
+    'CG': ('Republic of the Congo', ['Congo (Brazzaville)', 'Congo-Brazzaville']),
+    'CH': ('Switzerland', ['Confoederatio Helvetica', 'Suisse', 'Schweiz']),
+    'CI': ('Ivory Coast', ["Côte d'Ivoire", 'Cote d Ivoire']),
+    'CK': ('Cook Islands', []),
+    'CL': ('Chile', []),
+    'CM': ('Cameroon', []),
+    'CN': ('China', ['Mainland China', 'People\'s Republic of China']),
+    'CO': ('Colombia', []),
+    'CR': ('Costa Rica', []),
+    'CU': ('Cuba', []),
+    'CV': ('Cape Verde', ['Cabo Verde']),
+    'CW': ('Curaçao', ['Curacao']),
+    'CX': ('Christmas Island', []),
+    'CY': ('Cyprus', []),
+    'CZ': ('Czechia', ['Czech Republic', 'Czech']),
+    'DE': ('Germany', ['Deutschland', 'Federal Republic of Germany']),
+    'DJ': ('Djibouti', []),
+    'DK': ('Denmark', []),
+    'DM': ('Dominica', []),
+    'DO': ('Dominican Republic', []),
+    'DZ': ('Algeria', []),
+    'EC': ('Ecuador', []),
+    'EE': ('Estonia', []),
+    'EG': ('Egypt', []),
+    'EH': ('Western Sahara', []),
+    'ER': ('Eritrea', []),
+    'ES': ('Spain', ['España']),
+    'ET': ('Ethiopia', []),
+    'FI': ('Finland', ['Suomi']),
+    'FJ': ('Fiji', []),
+    'FK': ('Falkland Islands', []),
+    'FM': ('Micronesia', ['Federated States of Micronesia']),
+    'FO': ('Faroe Islands', []),
+    'FR': ('France', []),
+    'GA': ('Gabon', []),
+    'GB': ('United Kingdom', ['UK', 'Britain', 'Great Britain',
+                              'United Kingdom of Great Britain',
+                              'England', 'Scotland', 'Wales',
+                              'Northern Ireland']),
+    'GD': ('Grenada', []),
+    'GE': ('Georgia', []),
+    'GF': ('French Guiana', []),
+    'GG': ('Guernsey', []),
+    'GH': ('Ghana', []),
+    'GI': ('Gibraltar', []),
+    'GL': ('Greenland', []),
+    'GM': ('Gambia', ['The Gambia']),
+    'GN': ('Guinea', []),
+    'GP': ('Guadeloupe', []),
+    'GQ': ('Equatorial Guinea', []),
+    'GR': ('Greece', []),
+    'GS': ('South Georgia', []),
+    'GT': ('Guatemala', []),
+    'GU': ('Guam', []),
+    'GW': ('Guinea-Bissau', []),
+    'GY': ('Guyana', []),
+    'HK': ('Hong Kong', ['Hong Kong SAR', 'Hong Kong, China']),
+    'HM': ('Heard Island and McDonald Islands', []),
+    'HN': ('Honduras', []),
+    'HR': ('Croatia', ['Hrvatska']),
+    'HT': ('Haiti', []),
+    'HU': ('Hungary', []),
+    'ID': ('Indonesia', []),
+    'IE': ('Ireland', ['Éire', 'Eire']),
+    'IL': ('Israel', []),
+    'IM': ('Isle of Man', []),
+    'IN': ('India', ['Bharat']),
+    'IO': ('British Indian Ocean Territory', []),
+    'IQ': ('Iraq', []),
+    'IR': ('Iran', ['Islamic Republic of Iran']),
+    'IS': ('Iceland', []),
+    'IT': ('Italy', ['Italia']),
+    'JE': ('Jersey', []),
+    'JM': ('Jamaica', []),
+    'JO': ('Jordan', []),
+    'JP': ('Japan', []),
+    'KE': ('Kenya', []),
+    'KG': ('Kyrgyzstan', []),
+    'KH': ('Cambodia', []),
+    'KI': ('Kiribati', []),
+    'KM': ('Comoros', []),
+    'KN': ('Saint Kitts and Nevis', ['St Kitts and Nevis', 'St. Kitts and Nevis']),
+    'KP': ('North Korea', ["Dem People's Rep of Korea",
+                           'Democratic People\'s Republic of Korea']),
+    'KR': ('South Korea', ['Korea', 'Republic of Korea']),
+    'KW': ('Kuwait', []),
+    'KY': ('Cayman Islands', []),
+    'KZ': ('Kazakhstan', []),
+    'LA': ('Laos', ["Lao People's Democratic Republic"]),
+    'LB': ('Lebanon', []),
+    'LC': ('Saint Lucia', ['St Lucia', 'St. Lucia']),
+    'LI': ('Liechtenstein', []),
+    'LK': ('Sri Lanka', []),
+    'LR': ('Liberia', []),
+    'LS': ('Lesotho', []),
+    'LT': ('Lithuania', []),
+    'LU': ('Luxembourg', []),
+    'LV': ('Latvia', []),
+    'LY': ('Libya', []),
+    'MA': ('Morocco', []),
+    'MC': ('Monaco', []),
+    'MD': ('Moldova', ['Republic of Moldova']),
+    'ME': ('Montenegro', []),
+    'MF': ('Saint Martin', []),
+    'MG': ('Madagascar', []),
+    'MH': ('Marshall Islands', []),
+    'MK': ('North Macedonia', ['Macedonia']),
+    'ML': ('Mali', []),
+    'MM': ('Myanmar', ['Burma']),
+    'MN': ('Mongolia', []),
+    'MO': ('Macao', ['Macau']),
+    'MP': ('Northern Mariana Islands', []),
+    'MQ': ('Martinique', []),
+    'MR': ('Mauritania', []),
+    'MS': ('Montserrat', []),
+    'MT': ('Malta', []),
+    'MU': ('Mauritius', []),
+    'MV': ('Maldives', []),
+    'MW': ('Malawi', []),
+    'MX': ('Mexico', ['México']),
+    'MY': ('Malaysia', []),
+    'MZ': ('Mozambique', []),
+    'NA': ('Namibia', []),
+    'NC': ('New Caledonia', []),
+    'NE': ('Niger', []),
+    'NF': ('Norfolk Island', []),
+    'NG': ('Nigeria', []),
+    'NI': ('Nicaragua', []),
+    'NL': ('Netherlands', ['The Netherlands', 'Holland', 'NL']),
+    'NO': ('Norway', ['Norge']),
+    'NP': ('Nepal', []),
+    'NR': ('Nauru', []),
+    'NU': ('Niue', []),
+    'NZ': ('New Zealand', ['Aotearoa']),
+    'OM': ('Oman', []),
+    'PA': ('Panama', []),
+    'PE': ('Peru', ['Perú']),
+    'PF': ('French Polynesia', []),
+    'PG': ('Papua New Guinea', []),
+    'PH': ('Philippines', ['The Philippines']),
+    'PK': ('Pakistan', []),
+    'PL': ('Poland', ['Polska']),
+    'PM': ('Saint Pierre and Miquelon', []),
+    'PN': ('Pitcairn Islands', []),
+    'PR': ('Puerto Rico', []),
+    'PS': ('Palestine', ['State of Palestine', 'Palestinian Territories']),
+    'PT': ('Portugal', []),
+    'PW': ('Palau', []),
+    'PY': ('Paraguay', []),
+    'QA': ('Qatar', []),
+    'RE': ('Réunion', ['Reunion']),
+    'RO': ('Romania', []),
+    'RS': ('Serbia', []),
+    'RU': ('Russia', ['Russian Federation']),
+    'RW': ('Rwanda', []),
+    'SA': ('Saudi Arabia', ['Kingdom of Saudi Arabia']),
+    'SB': ('Solomon Islands', []),
+    'SC': ('Seychelles', []),
+    'SD': ('Sudan', []),
+    'SE': ('Sweden', ['Sverige']),
+    'SG': ('Singapore', []),
+    'SH': ('Saint Helena', []),
+    'SI': ('Slovenia', []),
+    'SJ': ('Svalbard and Jan Mayen', []),
+    'SK': ('Slovakia', ['Slovak Republic']),
+    'SL': ('Sierra Leone', []),
+    'SM': ('San Marino', []),
+    'SN': ('Senegal', []),
+    'SO': ('Somalia', []),
+    'SR': ('Suriname', []),
+    'SS': ('South Sudan', []),
+    'ST': ('São Tomé and Príncipe',
+           ['Sao Tome and Principe', 'Sao Tome']),
+    'SV': ('El Salvador', []),
+    'SX': ('Sint Maarten', []),
+    'SY': ('Syria', ['Syrian Arab Republic']),
+    'SZ': ('Eswatini', ['Swaziland']),
+    'TC': ('Turks and Caicos Islands', []),
+    'TD': ('Chad', []),
+    'TF': ('French Southern Territories', []),
+    'TG': ('Togo', []),
+    'TH': ('Thailand', []),
+    'TJ': ('Tajikistan', []),
+    'TK': ('Tokelau', []),
+    'TL': ('Timor-Leste', ['East Timor']),
+    'TM': ('Turkmenistan', []),
+    'TN': ('Tunisia', []),
+    'TO': ('Tonga', []),
+    'TR': ('Turkey', ['Türkiye', 'Turkiye']),
+    'TT': ('Trinidad and Tobago', ['Trinidad']),
+    'TV': ('Tuvalu', []),
+    'TW': ('Taiwan', ['Taiwan, Province of China']),
+    'TZ': ('Tanzania', ['United Republic of Tanzania']),
+    'UA': ('Ukraine', []),
+    'UG': ('Uganda', []),
+    'UM': ('US Outlying Islands', []),
+    'US': ('United States', ['USA', 'U.S.A.', 'U.S.', 'America',
+                             'United States of America', 'The States']),
+    'UY': ('Uruguay', []),
+    'UZ': ('Uzbekistan', []),
+    'VA': ('Vatican City', ['Holy See', 'Vatican', 'Santa Sede']),
+    'VC': ('Saint Vincent and the Grenadines',
+           ['St Vincent and the Grenadines', 'St. Vincent and the Grenadines']),
+    'VE': ('Venezuela', ['Venezuela, Bolivarian Republic of']),
+    'VG': ('British Virgin Islands', ['BVI']),
+    'VI': ('US Virgin Islands', ['Virgin Islands (U.S.)', 'USVI']),
+    'VN': ('Vietnam', ['Việt Nam', 'Viet Nam']),
+    'VU': ('Vanuatu', []),
+    'WF': ('Wallis and Futuna', []),
+    'WS': ('Samoa', []),
+    'YE': ('Yemen', []),
+    'YT': ('Mayotte', []),
+    'ZA': ('South Africa', ['RSA']),
+    'ZM': ('Zambia', []),
+    'ZW': ('Zimbabwe', []),
+    # Common non-ISO territories kept for accurate labelling.
+    'XK': ('Kosovo', []),
+}
+
+
+def _build_country_lookup():
+    """Return {normalized_alias: (iso2, display_name)}.
+
+    Prefers the full ISO 3166 dataset shipped by ``pycountry`` (names,
+    official names and common aliases) when available; always merges the
+    curated fallback above so recognition stays deterministic in test/dev
+    environments without the optional dependency.
+    """
+    lookup = {}
+
+    def add(alias, iso2, name):
+        key = re.sub(r'[^a-z0-9 ]+', ' ', (alias or '').lower())
+        key = re.sub(r'\s+', ' ', key).strip()
+        if key and key not in lookup:
+            lookup[key] = (iso2, name)
+
+    try:  # optional dependency — best-effort enrichment only
+        import pycountry
+        for c in pycountry.countries:
+            name = _ISO3166.get(c.alpha_2, (None, None))[0] or c.name
+            add(c.name, c.alpha_2, name)
+            add(getattr(c, 'official_name', None), c.alpha_2, name)
+            for alias in getattr(c, 'common_names', []) or []:
+                add(alias, c.alpha_2, name)
+            add(c.alpha_2, c.alpha_2, name)
+            add(getattr(c, 'alpha_3', None), c.alpha_2, name)
+    except Exception:
+        pass
+
+    for iso2, (name, aliases) in _ISO3166.items():
+        add(name, iso2, name)
+        add(iso2, iso2, name)
+        for alias in aliases:
+            add(alias, iso2, name)
+    return lookup
+
+
+_COUNTRY_LOOKUP = _build_country_lookup()
+
+# Free-text location tokens that are cities/regions rather than countries —
+# mapped straight to their country so "Paris" and "Paris, France" land in
+# the same bucket. Deliberately small: unknown city names simply fall back
+# to the slug strategy below.
+_CITY_TO_COUNTRY = {
+    'london': 'GB', 'new york': 'US', 'nyc': 'US', 'los angeles': 'US',
+    'chicago': 'US', 'san francisco': 'US', 'seattle': 'US', 'boston': 'US',
+    'austin': 'US', 'toronto': 'CA', 'vancouver': 'CA', 'montreal': 'CA',
+    'paris': 'FR', 'berlin': 'DE', 'munich': 'DE', 'hamburg': 'DE',
+    'madrid': 'ES', 'barcelona': 'ES', 'rome': 'IT', 'milan': 'IT',
+    'amsterdam': 'NL', 'rotterdam': 'NL', 'vienna': 'AT', 'zurich': 'CH',
+    'geneva': 'CH', 'stockholm': 'SE', 'oslo': 'NO', 'copenhagen': 'DK',
+    'helsinki': 'FI', 'dublin': 'IE', 'lisbon': 'PT', 'porto': 'PT',
+    'athens': 'GR', 'prague': 'CZ', 'budapest': 'HU', 'warsaw': 'PL',
+    'krakow': 'PL', 'kyiv': 'UA', 'kiev': 'UA', 'tokyo': 'JP',
+    'osaka': 'JP', 'beijing': 'CN', 'shanghai': 'CN', 'shenzhen': 'CN',
+    'seoul': 'KR', 'singapore': 'SG', 'hong kong': 'HK', 'taipei': 'TW',
+    'bangkok': 'TH', 'jakarta': 'ID', 'manila': 'PH', 'ho chi minh': 'VN',
+    'hanoi': 'VN', 'new delhi': 'IN', 'mumbai': 'IN', 'bengaluru': 'IN',
+    'bangalore': 'IN', 'hyderabad': 'IN', 'chennai': 'IN', 'pune': 'IN',
+    'karachi': 'PK', 'lahore': 'PK', 'dhaka': 'BD', 'colombo': 'LK',
+    'sydney': 'AU', 'melbourne': 'AU', 'brisbane': 'AU', 'perth': 'AU',
+    'auckland': 'NZ', 'dubai': 'AE', 'tel aviv': 'IL', 'jerusalem': 'IL',
+    'riyadh': 'SA', 'istanbul': 'TR', 'ankara': 'TR', 'cairo': 'EG',
+    'lagos': 'NG', 'nairobi': 'KE', 'capetown': 'ZA', 'cape town': 'ZA',
+    'johannesburg': 'ZA', 'accra': 'GH', 'casablanca': 'MA', 'tunis': 'TN',
+    'moscow': 'RU', 'saint petersburg': 'RU', 'mexico city': 'MX',
+    'guadalajara': 'MX', 'monterrey': 'MX', 'bogota': 'CO', 'lima': 'PE',
+    'santiago': 'CL', 'buenos aires': 'AR', 'saopaulo': 'BR',
+    'sao paulo': 'BR', 'rio de janeiro': 'BR', 'caracas': 'VE',
+    'quito': 'EC', 'lapaz': 'BO', 'montevideo': 'UY', 'santos': 'BR',
+}
+
+
+def slugify_location(text):
+    """URL-safe bucket key for an unrecognized free-text location."""
+    slug = re.sub(r'[^a-z0-9]+', '-', (text or '').strip().lower())
+    return slug.strip('-')[:48]
+
+
+def match_country(location):
+    """Map a free-text location string to (code, display_name) or None.
+
+    Order of attempts: exact country name/alias/ISO code → embedded comma
+    segment ("Berlin, Germany") → known-city table. Anything unrecognized
+    returns None so the caller can fall back to a slug bucket.
+    """
+    raw = (location or '').strip()
+    if not raw:
+        return None
+    norm = lambda s: re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9 ]+', ' ',
+                                                s.lower())).strip()
+    whole = norm(raw)
+    hit = _COUNTRY_LOOKUP.get(whole)
+    if hit:
+        return hit
+    # Comma-separated pieces, most specific first ("Germany, Berlin" →
+    # both parts checked; first recognized country wins).
+    for part in [norm(p) for p in raw.split(',') if norm(p)] + \
+                [norm(p) for p in raw.split('-') if norm(p)]:
+        hit = _COUNTRY_LOOKUP.get(part)
+        if hit:
+            return hit
+        hit2 = _COUNTRY_LOOKUP.get(norm(re.sub(r'\s+(?:and|&)\s+.*$', '',
+                                               part)))
+        if hit2:
+            return hit2
+    city = _CITY_TO_COUNTRY.get(whole)
+    if city is None:
+        head = norm(raw.split(',')[0])
+        city = _CITY_TO_COUNTRY.get(head)
+    if city:
+        return _ISO3166[city][0] and (city, _ISO3166[city][0])
+    return None
+
+
+def apply_country_fields(user, location):
+    """Set ``location`` plus derived ``country_code``/``country_name``."""
+    user.location = location
+    hit = match_country(location)
+    if hit:
+        user.country_code, user.country_name = hit
+    elif location:
+        # Unrecognized place ("Springfield") — keep it searchable under a
+        # stable slug bucket instead of dropping it silently.
+        user.country_code = slugify_location(location)[:2] or None
+        user.country_name = location
+    else:
+        user.country_code = user.country_name = None
+    return user
+
+
+def flag_emoji(iso2):
+    """Regional-indicator emoji for a real ISO alpha-2 code, else None.
+
+    Slug buckets (lowercase, e.g. 'sp') are deliberately excluded so they
+    never render as bogus flags.
+    """
+    code = (iso2 or '').upper()
+    if len(code) != 2 or not code.isalpha():
+        return None
+    if code not in _ISO3166:
+        return None
+    return ''.join(chr(0x1F1E6 + ord(ch) - ord('A')) for ch in code)
+
+
+def country_slug(code):
+    """URL fragment for a country bucket ('VA' -> 'va', 'sp' -> 'sp')."""
+    return (code or '').strip().lower()
+
+
+def _country_profile_ids(include_adult):
+    """Ids of opted-in users with directory-listable content links.
+
+    "Contenting profile" = at least one active link on a non-personal-
+    website Link Source plus a headline or bio, and the searchable box
+    checked. Adult-oriented owners only qualify for 18+-verified viewers.
+    """
+    ids = LinkSource.directory_source_ids(include_adult=include_adult)
+    if not ids:
+        return set()
+    q = (db.session.query(Link.user_id)
+         .join(User, User.id == Link.user_id)
+         .filter(Link.is_active.is_(True),
+                 User.directory_visible.is_(True),
+                 Link.source_id.in_(ids),
+                 db.or_(User.headline.isnot(None),
+                        User.bio.isnot(None)))
+         .distinct())
+    if not include_adult:
+        q = q.filter(User.is_adult_oriented.is_(False))
+    return {r[0] for r in q.all()}
+
+
+def country_buckets(include_adult):
+    """List of {'code','name','members','flag'} buckets sorted by name.
+
+    Single source of truth for every country-search surface (/countries,
+    /country/<slug>, sidebar leaderboards, sitemap). A user only counts
+    toward a bucket when ALL of the following hold:
+      * they checked the "make my profile searchable" box on their
+        dashboard (User.directory_visible — opt-in, defaults to FALSE),
+      * they have at least one active link on a directory-listable
+        Link Source ("contenting profiles"; personal websites never
+        qualify — see LinkSource.NON_DIRECTORY_SOURCES),
+      * their profile carries visible content (a headline or a bio), so
+        empty placeholder accounts don't inflate a country tile,
+      * adult-oriented profiles are counted only for 18+-verified
+        viewers (``include_adult``), matching the directory age gate.
+    Countries with zero qualifying members are simply absent — Vatican
+    City stays off the map until someone there opts in with real content.
+    """
+    member_ids = _country_profile_ids(include_adult)
+    if not member_ids:
+        return []
+    rows = (db.session.query(
+                User.country_code, User.country_name,
+                func.count(func.distinct(User.id)).label('members'))
+            .filter(User.directory_visible.is_(True),
+                    User.id.in_(member_ids),
+                    User.country_code.isnot(None),
+                    User.country_code != '')
+            .group_by(func.upper(User.country_code), User.country_name).all())
+    buckets = [{'code': r[0],
+                'name': r[1] or r[0],
+                'members': int(r[2]),
+                'flag': flag_emoji(r[0])}
+               for r in rows if r[2]]
+    buckets.sort(key=lambda b: (b['name'] or '').casefold())
+    return buckets
+
+
+def backfill_country_fields():
+    """Derive country_code/country_name for users that predate this story.
+
+    Idempotent: only touches rows where location is set but no bucket was
+    computed yet. Run at dev startup (see create_app); production should
+    run it once inside the Alembic migration or via a management shell.
+    """
+    stale = (User.query
+             .filter(User.location.isnot(None),
+                     User.location != '',
+                     db.or_(User.country_code.is_(None),
+                            User.country_code == ''))
+             .all())
+    changed = False
+    for u in stale:
+        apply_country_fields(u, u.location)
+        if u.country_code:
+            changed = True
+    if changed:
+        db.session.commit()
 
 
 def register_routes(app):
@@ -610,8 +1120,11 @@ def register_routes(app):
                 current_user.headline = request.form.get('headline')
                 current_user.bio = request.form.get('bio')
                 current_user.about_section = request.form.get('about_section')
-                current_user.location = (request.form.get('location')
-                                         or '').strip()[:120] or None
+                # Location + derived country bucket (powers /countries for
+                # users who also check the searchable box).
+                apply_country_fields(
+                    current_user,
+                    (request.form.get('location') or '').strip()[:120] or None)
                 # Skills: normalized list, stored back as a clean CSV string.
                 skills = normalize_skills(request.form.get('skills'))
                 current_user.skills = ', '.join(skills) or None
@@ -964,6 +1477,178 @@ def register_routes(app):
                 db.session.commit()
             flash('Adult networks are now visible.', 'success')
         return redirect(url_for('directory'))
+
+    # ------------------------------------------------------------------
+    # Country search (/countries, /country/<slug>)
+    # ------------------------------------------------------------------
+    # Same visibility contract as the Link Source directory: only users
+    # who checked "make my profile searchable" (User.directory_visible)
+    # AND have a contenting profile count. Countries with zero qualifying
+    # members never render — Vatican City stays hidden until a verified
+    # user there opts in — so the map is self-curating.
+    #
+    # Unique presentation: an alphabetical *continent shelf* layout. The
+    # page groups live country tiles under continent headings (Africa,
+    # Asia, Europe, ...) computed from the ISO code via pycountry when
+    # available (else a curated region map), each tile prefixed with its
+    # flag emoji and member count, plus a "Top countries" leaderboard.
+    # Unrecognized free-text locations fall into an "Elsewhere" shelf so
+    # no opted-in user is ever silently dropped.
+    # ------------------------------------------------------------------
+
+    COUNTRY_PAGE_SIZE_DEFAULT = 24
+
+    # Fallback ISO alpha-2 → UN-style region grouping (used when pycountry
+    # is not installed; kept deliberately coarse).
+    _REGION_FALLBACK = {
+        'Africa': ['DZ','AO','BJ','BW','BF','BI','CM','CV','CF','TD','KM','CG',
+                   'CD','CI','DJ','EG','GQ','ER','SZ','ET','GA','GM','GH','GN',
+                   'GW','KE','LS','LR','LY','MG','MW','ML','MR','MU','MA','MZ',
+                   'NA','NE','NG','RW','ST','SN','SC','SL','SO','ZA','SS','SD',
+                   'TZ','TG','TN','UG','EH','ZM','ZW','SH'],
+        'Americas': ['AG','AR','BS','BB','BZ','BM','BO','BR','CA','CL','CO','CR',
+                     'CU','DM','DO','EC','SV','GD','GL','GT','GY','HT','HN','JM',
+                     'MX','NI','PA','PY','PE','KN','LC','VC','SR','TT','US','UY',
+                     'VE','PR','VI','VG','AI','AW','BQ','CW','SX','TC','PM','MS',
+                     'KY','FK','GF','GP','MQ','NF'],
+        'Asia': ['AF','AM','AZ','BH','BD','BT','BN','KH','CN','CY','GE','IN','ID',
+                 'IR','IQ','IL','JP','JO','KZ','KP','KR','KW','KG','LA','LB','MO',
+                 'MY','MV','MN','MM','NP','OM','PK','PH','QA','SA','SG','LK','SY',
+                 'TJ','TH','TL','TR','TM','AE','UZ','VN','YE','HK','TW','PS'],
+        'Europe': ['AL','AD','AT','BY','BE','BA','BG','HR','CZ','DK','EE','FI','FR',
+                   'DE','GI','GR','HU','IS','IE','IT','XK','LV','LI','LT','LU','MT',
+                   'MD','MC','ME','NL','MK','NO','PL','PT','RO','RU','SM','RS','SK',
+                   'SI','ES','SE','CH','UA','GB','VA','FO','GG','IM','JE','SJ','YT'],
+        'Oceania': ['AU','FJ','KI','MH','NR','NZ','NU','PF','PG','PN','WS','SB','TK',
+                    'TO','TV','VU','NC','MP','GU','AS','CK','WF','HM'],
+    }
+    _CODE_TO_REGION = {}
+    for _region, _codes in _REGION_FALLBACK.items():
+        for _c in _codes:
+            _CODE_TO_REGION.setdefault(_c, _region)
+
+    def _continent_of(code):
+        """Continent/region label for a bucket code ('US' -> 'Americas').
+
+        Slug buckets (lowercase, unrecognized places) always land in
+        "Elsewhere". Prefers pycountry's region/sub-region data when the
+        optional package is installed.
+        """
+        if not code or code != code.upper() or not code.isalpha():
+            return 'Elsewhere'
+        try:
+            import pycountry
+            c = pycountry.countries.get(alpha_2=code)
+            if c is not None:
+                sub = getattr(c, 'sub_region', None) or ''
+                for name, keys in (('Africa', ('Africa',)),
+                                   ('Americas', ('America',)),
+                                   ('Asia', ('Asia',)),
+                                   ('Europe', ('Europe',)),
+                                   ('Oceania', ('Oceania', 'Pacific'))):
+                    if any(k.lower() in sub.lower() for k in keys):
+                        return name
+        except Exception:
+            pass
+        return _CODE_TO_REGION.get(code, 'Elsewhere')
+
+    CONTINENT_ORDER = ('Africa', 'Americas', 'Asia', 'Europe', 'Oceania',
+                       'Elsewhere')
+
+    @app.route('/countries')
+    def countries():
+        """Country search: every country that has searchable members."""
+        include_adult = directory_adult_ok()
+        buckets = country_buckets(include_adult)
+        total_profiles = sum(b['members'] for b in buckets)
+        # Shelf layout: group by continent, alphabetical within each shelf.
+        shelves = []
+        grouped = {}
+        for b in buckets:
+            grouped.setdefault(_continent_of(b['code']), []).append(b)
+        for region in CONTINENT_ORDER:
+            items = grouped.pop(region, None)
+            if items:
+                shelves.append({'region': region, 'items': items})
+        for region in sorted(grouped):  # defensive: unexpected labels
+            shelves.append({'region': region, 'items': grouped[region]})
+        top = sorted(buckets, key=lambda b: (-b['members'],
+                                             (b['name'] or '').casefold()))
+        sidebar_n = max(3, min(Setting.get_int('country_sidebar_top', 10), 25))
+        q = (request.args.get('q') or '').strip().lower()
+        filtered = [b for b in buckets
+                    if q and q in (b['name'] or '').lower()] if q else None
+        return render_template('countries.html',
+                               shelves=shelves,
+                               buckets=buckets,
+                               filtered=filtered,
+                               q=q,
+                               top=top[:sidebar_n],
+                               total_countries=len(buckets),
+                               total_profiles=total_profiles,
+                               include_adult=include_adult)
+
+    @app.route('/country/<slug>')
+    def country_detail(slug):
+        """Member listing for one country bucket."""
+        include_adult = directory_adult_ok()
+        want = (slug or '').strip().lower()
+        bucket = next((b for b in country_buckets(include_adult)
+                       if country_slug(b['code']) == want), None)
+        if bucket is None:
+            abort(404)
+
+        per_page = max(1, min(Setting.get_int('country_page_size',
+                                              COUNTRY_PAGE_SIZE_DEFAULT), 200))
+        featured_max = max(0, min(Setting.get_int('directory_featured_max', 5),
+                                  20))
+        member_ids = _country_profile_ids(include_adult)
+        rows = (User.query
+                .filter(User.id.in_(member_ids),
+                        User.directory_visible.is_(True),
+                        func.upper(User.country_code) == want.upper())
+                .all())
+        cards = []
+        for u in rows:
+            best = (Link.query
+                    .filter(Link.user_id == u.id,
+                            Link.is_active.is_(True),
+                            Link.source_id.in_(
+                                LinkSource.directory_source_ids(
+                                    include_adult) or {-1}))
+                    .first())
+            cards.append({
+                'user': u,
+                'link': best,
+                'paid': u.tier in PAID_TIERS,
+                'featured': bool(getattr(u, 'is_featured', False)),
+            })
+        pool = [c for c in cards if c['paid'] or c['featured']]
+        random.shuffle(pool)
+        featured = pool[:featured_max]
+        featured_ids = {c['user'].id for c in featured}
+        rest = sorted((c for c in cards if c['user'].id not in featured_ids),
+                      key=lambda c: ((c['user'].display_name or
+                                      c['user'].username).casefold(),
+                                     c['user'].username))
+        total_pages = max(1, -(-len(rest) // per_page))
+        page = min(max(1, request.args.get('page', 1, type=int)), total_pages)
+        start = (page - 1) * per_page
+        members = rest[start:start + per_page]
+
+        other = [b for b in country_buckets(include_adult)
+                 if b['code'] != bucket['code']][:10]
+        return render_template('country_detail.html',
+                               bucket=bucket,
+                               flag=bucket['flag'],
+                               featured=featured,
+                               members=members,
+                               page=page, total_pages=total_pages,
+                               total_members=len(cards),
+                               total_rest=len(rest),
+                               per_page=per_page,
+                               other_countries=other,
+                               include_adult=include_adult)
 
     # ------------------------------------------------------------------
     # Link Source detail page (/directory/<slug>)
@@ -3302,7 +3987,8 @@ def register_template_context(app):
         # inbox, admin) is noindex,nofollow so bots never see private state.
         PUBLIC_INDEXABLE = {'home', 'public_profile', 'public_profile_alias',
                             'help_center', 'contact', 'terms', 'privacy',
-                            'ai_grounding', 'directory', 'directory_source'}
+                            'ai_grounding', 'directory', 'directory_source',
+                            'countries', 'country_detail'}
         endpoint = request.endpoint
         noindex = (endpoint not in PUBLIC_INDEXABLE) or _is_impersonating()
         if noindex:
@@ -3332,6 +4018,9 @@ def register_template_context(app):
             'page_robots': page_robots,
             # Public navigation / footer links (directory of Link Sources).
             'source_slug': source_slug,
+            # Country search helpers (templates render flag emoji + slugs).
+            'country_slug': country_slug,
+            'flag_emoji': flag_emoji,
         }
 
 
