@@ -129,6 +129,12 @@ class User(UserMixin, db.Model):
     # hidden for this profile.
     contact_disabled = db.Column(db.Boolean, default=False, nullable=False,
                                  server_default='0')
+    # Directory visibility preference (dashboard privacy toggle). Default
+    # False = opted out: none of this user's links are listed on the public
+    # /directory pages. Personal-website links are always excluded from the
+    # directory regardless of this flag (see LinkSource.is_directory_excluded).
+    directory_visible = db.Column(db.Boolean, default=False, nullable=False,
+                                  server_default='0')
 
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
@@ -263,6 +269,31 @@ class Link(db.Model):
         src = self.matched_source
         return self.category or (src.category if src else 'Other') \
             or 'Other'
+
+    # ---------------------------------------------------------------
+    # Public directory eligibility
+    # ---------------------------------------------------------------
+    # A link may be listed on the /directory pages only when ALL of these
+    # hold:
+    #   1. the link itself is active (hidden links stay private),
+    #   2. its owner opted in via the dashboard privacy toggle
+    #      (``User.directory_visible``, default False), and
+    #   3. the source is a real network profile -- personal websites are
+    #      strictly excluded no matter what the toggle says.
+    # ``is_adult`` (on LinkCategory / LinkSource) is layered on top of this
+    # by the directory routes for tier-based display control.
+    @property
+    def is_directory_eligible(self):
+        """True when this link may appear in the public directory."""
+        if not self.is_active:
+            return False
+        owner = self.owner
+        if owner is None or not owner.directory_visible:
+            return False
+        src = self.matched_source
+        if src is None or src.is_deleted or not src.is_active:
+            return False
+        return not src.is_directory_excluded
 
     @property
     def brand_bg(self):
@@ -514,6 +545,24 @@ class LinkSource(db.Model):
 
     def __repr__(self):
         return f'<LinkSource {self.name}>'
+
+    # Sources that represent a personal site rather than a social-network
+    # profile. They are strictly excluded from the public directory -- even
+    # when the owner opted in with ``User.directory_visible`` -- so the
+    # directory stays an index of networks instead of a link farm.
+    NON_DIRECTORY_SOURCES = frozenset({'Personal Website'})
+
+    @property
+    def is_directory_excluded(self):
+        """True when links from this source never appear in the directory."""
+        return (self.name or '').strip() in self.NON_DIRECTORY_SOURCES
+
+    @classmethod
+    def directory_source_ids(cls):
+        """Ids of live sources that *are* allowed in the directory."""
+        return [r.id for r in cls.query.filter_by(is_deleted=False,
+                                                  is_active=True).all()
+                if not r.is_directory_excluded]
 
     @classmethod
     def active(cls):
