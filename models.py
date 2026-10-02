@@ -25,6 +25,9 @@ DEFAULT_SETTINGS = {
     # Broken-link notification spam guard: minimum days between reports
     # about the *same* still-broken link set (used by check_links.py).
     'link_check_notify_days': '7',
+    # Public directory (/directory/<source>) display rules.
+    'directory_page_size': '24',      # non-featured members per page
+    'directory_featured_max': '5',    # paid "featured" slots at the top
 }
 
 
@@ -129,8 +132,40 @@ class User(UserMixin, db.Model):
     # hidden for this profile.
     contact_disabled = db.Column(db.Boolean, default=False, nullable=False,
                                  server_default='0')
+    # Directory visibility preference (dashboard privacy toggle). Default
+    # False = opted out: none of this user's links are listed on the public
+    # /directory pages. Personal-website links are always excluded from the
+    # directory regardless of this flag (see LinkSource.is_directory_excluded).
+    directory_visible = db.Column(db.Boolean, default=False, nullable=False,
+                                  server_default='0')
+    # Set once a logged-in user passes the 18+ age gate (see /directory and
+    # /u/<username>/confirm-age). Remembers verification per account so the
+    # gate is not re-shown on every device session; the session flag
+    # ``age_ok`` remains the short-lived, cookie-based equivalent.
+    age_verified = db.Column(db.Boolean, default=False, nullable=False,
+                             server_default='0')
+    # Featured-slot placement on the public directory pages. Paid users are
+    # slotted at the top of /directory/<source> results (max N shown, chosen
+    # at random — see Setting 'directory_featured_max'). Admins can pin a
+    # free-tier account into the featured slots or suppress a paying account
+    # without changing anyone's billing tier.
+    is_featured = db.Column(db.Boolean, default=False, nullable=False,
+                            server_default='0')
 
     created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+
+    def can_view_adult(self):
+        """Whether this account may see 18+ content (directory cards, etc.).
+
+        AC: a user must be logged in with at least a free account — no
+        profile creation required — and verified as 18+. Registration now
+        asserts "I am 18 or older" (see ``templates/register.html``), so new
+        accounts are verified from signup onwards; legacy accounts flip the
+        flag via the one-time age gate (/directory/age-gate,
+        /u/<username>/confirm-age). Admins bypass it so they can QA the
+        catalogue.
+        """
+        return bool(self.is_admin or self.age_verified)
 
     # Relationships
     links = db.relationship('Link', backref='owner', lazy=True,
@@ -264,6 +299,31 @@ class Link(db.Model):
         return self.category or (src.category if src else 'Other') \
             or 'Other'
 
+    # ---------------------------------------------------------------
+    # Public directory eligibility
+    # ---------------------------------------------------------------
+    # A link may be listed on the /directory pages only when ALL of these
+    # hold:
+    #   1. the link itself is active (hidden links stay private),
+    #   2. its owner opted in via the dashboard privacy toggle
+    #      (``User.directory_visible``, default False), and
+    #   3. the source is a real network profile -- personal websites are
+    #      strictly excluded no matter what the toggle says.
+    # ``is_adult`` (on LinkCategory / LinkSource) is layered on top of this
+    # by the directory routes for tier-based display control.
+    @property
+    def is_directory_eligible(self):
+        """True when this link may appear in the public directory."""
+        if not self.is_active:
+            return False
+        owner = self.owner
+        if owner is None or not owner.directory_visible:
+            return False
+        src = self.matched_source
+        if src is None or src.is_deleted or not src.is_active:
+            return False
+        return not src.is_directory_excluded
+
     @property
     def brand_bg(self):
         src = self.matched_source
@@ -343,6 +403,53 @@ class Link(db.Model):
             return u
         return ''
 
+    # ------------------------------------------------------------------
+    # Directory detail cards (/directory/<source>)
+    # ------------------------------------------------------------------
+    @property
+    def network_profile_url(self):
+        """The member's profile URL on the network, cleaned for display.
+
+        Stored URLs sometimes carry tracking junk or a trailing slash; we
+        normalise scheme/host case and append the link's own UTM params when
+        present (they are the owner's chosen attribution).
+        """
+        from urllib.parse import urlsplit, urlunsplit
+        raw = (self.url or '').strip()
+        if not raw:
+            return '#'
+        if '://' not in raw:
+            raw = 'https://' + raw
+        try:
+            parts = urlsplit(raw)
+        except ValueError:
+            return raw
+        netloc = (parts.hostname or '').lower()
+        if parts.port:
+            netloc = f'{netloc}:{parts.port}'
+        path = parts.path.rstrip('/') or '/'
+        query = parts.query
+        utm = self.safe_utm
+        if utm:
+            sep = '&' if query else ''
+            query = f'{query}{sep}{utm.lstrip("?")}'
+        return urlunsplit((parts.scheme.lower() or 'https', netloc, path,
+                           query, parts.fragment))
+
+    @property
+    def network_handle(self):
+        """Best-effort '@handle' for directory cards (subhandle or last path
+        segment of the network profile URL)."""
+        sh = (self.subhandle or '').strip()
+        if sh:
+            return sh if sh.startswith('@') else '@' + sh.lstrip('u/')
+        from urllib.parse import urlsplit
+        try:
+            path = urlsplit(self.network_profile_url).path.strip('/')
+        except ValueError:
+            return ''
+        return path.split('/')[-1] if path else ''
+
 
 def _url_host(url):
     from urllib.parse import urlparse
@@ -382,6 +489,12 @@ class LinkCategory(db.Model):
     bg_color = db.Column(db.String(9), default='#f8f9fa', nullable=False)
     text_color = db.Column(db.String(9), default='#212529', nullable=False)
     sort_order = db.Column(db.Integer, default=0, nullable=False)
+    # Display-control flag for the whole category (and its linked sources).
+    # Free-tier users should not see adult content: categories marked here —
+    # or sources carrying their own ``LinkSource.is_adult`` flag — are hidden
+    # behind gating logic. Reserved for use in the next-phase tier features.
+    is_adult = db.Column(db.Boolean, default=False, nullable=False,
+                         server_default='0')
     is_deleted = db.Column(db.Boolean, default=False, nullable=False,
                            server_default='0')  # soft delete (admin CRUD)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(),
@@ -466,6 +579,9 @@ DEFAULT_LINK_SOURCES = [
     ('Etsy',      'etsy.com',                         '#f16521', '#ffffff', '#c95119', 'shop',          'Store'),
     ('Amazon Storefront', 'amazon.com,amzn.to',       '#ff9900', '#131921', '#e08700', 'bag',           'Store'),
     ('Personal Website', '',                            '#f8f9fa', '#212529', '#dee2e6', 'globe2',      'Portfolio'),
+    # 18+ by nature — flagged in ADULT_SOURCE_NAMES so it is seeded with
+    # ``is_adult=True`` and hidden from guests / unverified accounts.
+    ('AdultWorld',  'adultworld.example',               '#4d0a0a', '#ffffff', '#2f0606', 'shield-lock', 'Other'),
 ]
 
 
@@ -509,6 +625,74 @@ class LinkSource(db.Model):
     def __repr__(self):
         return f'<LinkSource {self.name}>'
 
+    # Sources that represent a personal site rather than a social-network
+    # profile. They are strictly excluded from the public directory -- even
+    # when the owner opted in with ``User.directory_visible`` -- so the
+    # directory stays an index of networks instead of a link farm.
+    NON_DIRECTORY_SOURCES = frozenset({'Personal Website'})
+
+    @property
+    def is_directory_excluded(self):
+        """True when links from this source never appear in the directory."""
+        return (self.name or '').strip() in self.NON_DIRECTORY_SOURCES
+
+    # ------------------------------------------------------------------
+    # Adult catalogue bootstrap (see "User Object Addition & Age Gate")
+    # ------------------------------------------------------------------
+    # Networks whose content is 18+ by nature. Flagged on first run so the
+    # directory gating rules have real data to enforce; admins can change
+    # any of these per-source in Admin -> Link Sources, and flag whole
+    # categories via Admin -> Link Categories (``LinkCategory.is_adult``).
+    ADULT_SOURCE_NAMES = frozenset({'AdultWorld'})
+
+    @classmethod
+    def seed_adult_flags(cls):
+        """Flag the known adult networks (idempotent, additive only)."""
+        changed = False
+        for src in cls.query.filter(cls.name.in_(cls.ADULT_SOURCE_NAMES)).all():
+            if not src.is_adult:
+                src.is_adult = True
+                changed = True
+        if changed:
+            db.session.commit()
+
+    # ---------------------------------------------------------------
+    # Adult / 18+ display control
+    # ---------------------------------------------------------------
+    # A source counts as adult when it is flagged directly (``is_adult``,
+    # admin-managed per source) OR when its LinkCategory is flagged
+    # ``is_adult`` (see the previous story's category-level field). The
+    # public /directory hides those cards from logged-out visitors and
+    # from logged-in users who have not been verified as 18+.
+    @property
+    def is_adult_effective(self):
+        """True when this source must be treated as adult content."""
+        if self.is_adult:
+            return True
+        cat = LinkCategory.get_by_name(self.category)
+        return bool(cat and cat.is_adult)
+
+    @classmethod
+    def visible_to(cls, include_adult):
+        """Live sources for public listings; adult ones only if allowed."""
+        out = []
+        for src in cls.active():
+            if src.is_adult_effective and not include_adult:
+                continue
+            out.append(src)
+        return out
+
+    @classmethod
+    def directory_source_ids(cls, include_adult=False):
+        """Ids of live sources that *are* allowed in the directory.
+
+        Personal-website sources are always dropped; adult sources are only
+        included when ``include_adult`` is true (i.e. the viewer has been
+        verified as 18+).
+        """
+        return [r.id for r in cls.visible_to(include_adult)
+                if not r.is_directory_excluded]
+
     @classmethod
     def active(cls):
         """Sources shown to users: not soft-deleted and flagged active."""
@@ -546,8 +730,15 @@ class LinkSource(db.Model):
 
     @classmethod
     def seed_defaults(cls):
-        """Populate the catalogue on first run (idempotent)."""
+        """Populate the catalogue on first run (idempotent).
+
+        Sources listed in ``ADULT_SOURCE_NAMES`` are created with
+        ``is_adult=True``; on an existing database the flags are re-applied
+        so a catalogue seeded before this field existed still enforces the
+        18+ directory rules.
+        """
         if cls.query.first() is not None:
+            cls.seed_adult_flags()
             return
         for idx, (name, domains, bg, txt, brd, icon, cat) in enumerate(DEFAULT_LINK_SOURCES):
             first_domain = (domains or '').split(',')[0].strip()
@@ -558,8 +749,10 @@ class LinkSource(db.Model):
                                text_color=txt, border_color=brd,
                                icon_code=icon, category=cat,
                                sort_order=idx, url=url,
-                               profile_pattern=pattern))
+                               profile_pattern=pattern,
+                               is_adult=name in cls.ADULT_SOURCE_NAMES))
         db.session.commit()
+        cls.seed_adult_flags()
 
 
 HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')

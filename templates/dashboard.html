@@ -344,6 +344,18 @@
                 profile from Google/AI search indexing.</span>
             </label>
           </div>
+          <div class="form-check form-switch mb-4">
+            <input class="form-check-input" type="checkbox" id="directory_visible"
+                   name="directory_visible" value="on"
+                   {{ 'checked' if current_user.directory_visible }}>
+            <label class="form-check-label" for="directory_visible">
+              List me in the public directory
+              <span class="d-block small text-muted">When on, your filled-out Link Sources can
+                appear on the <a href="{{ url_for('directory') }}">Social Networks directory</a>.
+                When off, none of your links are listed anywhere in it. Personal websites are
+                never included, regardless of this setting.</span>
+            </label>
+          </div>
           <div class="mb-3">
             <label class="form-label">Avatar</label>
             <div class="d-flex align-items-center gap-3 mb-2">

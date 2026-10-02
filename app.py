@@ -13,6 +13,7 @@ Run in production (PostgreSQL):
 
 import json
 import os
+import random
 import re
 from datetime import datetime, timedelta
 
@@ -52,6 +53,7 @@ RESERVED_USERNAMES = {
     'docs', 'help', 'img', 'inbox', 'js', 'login', 'logout', 'pricing',
     'privacy', 'profile', 'redirect', 'register', 'report', 'settings',
     'static', 'status', 'support', 'terms', 'test', 'uploads', 'u', 'www',
+    'directory', 'networks', 'mature',
 }
 
 USERNAME_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{2,30}$')
@@ -366,6 +368,78 @@ def _dashboard_example_link():
     return demo
 
 
+HEX6_RE = re.compile(r'^#?([0-9a-fA-F]{6})$')
+
+
+def _hex_rgb(value):
+    """'#rrggbb' -> (r, g, b) or None when unparseable."""
+    m = HEX6_RE.match((value or '').strip())
+    if not m:
+        return None
+    h = m.group(1)
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _relative_luminance(rgb):
+    """WCAG relative luminance of an sRGB triplet."""
+    def chan(c):
+        c /= 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = rgb
+    return 0.2126 * chan(r) + 0.7152 * chan(g) + 0.0722 * chan(b)
+
+
+def _contrast_ratio(rgb1, rgb2):
+    """WCAG contrast ratio between two colors (1.0 .. 21.0)."""
+    l1 = _relative_luminance(rgb1)
+    l2 = _relative_luminance(rgb2)
+    hi, lo = max(l1, l2), min(l1, l2)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def readable_text_color(bg, fallback='#212529'):
+    """Return a text color that stays legible on ``bg``.
+
+    The source's curated ``text_color`` is used whenever it clears WCAG AA
+    for large text (>= 3:1) against the brand background; otherwise we fall
+    back to white/near-black depending on which side contrasts better. This
+    keeps directory cards in brand colors without ever producing unreadable
+    combinations.
+    """
+    bg_rgb = _hex_rgb(bg)
+    if bg_rgb is None:
+        return fallback
+    cur = _hex_rgb(fallback)
+    if cur is not None and _contrast_ratio(cur, bg_rgb) >= 3.0:
+        return fallback
+    white, ink = (255, 255, 255), (26, 29, 38)
+    best = white if _contrast_ratio(white, bg_rgb) >= _contrast_ratio(ink, bg_rgb) else ink
+    return '#{:02x}{:02x}{:02x}'.format(*best)
+
+
+def source_slug(name):
+    """URL fragment for a Link Source name ('X / Twitter' -> 'x-twitter')."""
+    slug = re.sub(r'[^a-z0-9]+', '-', (name or '').strip().lower())
+    return slug.strip('-')
+
+
+def directory_adult_ok():
+    """True when the current viewer may see adult entries in the directory.
+
+    AC: adult cards are hidden for logged-out/guest users and only visible
+    to logged-in users who have been verified as 18+ (one-time age gate,
+    remembered per account). Admins are always allowed so they can QA the
+    catalogue.
+    """
+    if _is_impersonating():
+        return False
+    if not current_user.is_authenticated:
+        return False
+    if getattr(current_user, 'is_admin', False):
+        return True
+    return bool(session.get('age_ok') or getattr(current_user, 'age_verified', False))
+
+
 def register_routes(app):
 
     @app.route('/')
@@ -430,6 +504,9 @@ def register_routes(app):
             email = (request.form.get('email') or '').strip().lower()
             password = request.form.get('password') or ''
             display_name = (request.form.get('display_name') or '').strip()
+            # Required age confirmation (18+) — persisted as User.age_verified
+            # so adult-content access controls can be enforced everywhere.
+            age_confirmed = request.form.get('age_confirmed') in ('yes', 'on', 'true', '1')
 
             errors = []
             if not username or len(username) < 3:
@@ -444,6 +521,9 @@ def register_routes(app):
                 errors.append('Please enter a valid email address.')
             if len(password) < 8:
                 errors.append('Password must be at least 8 characters.')
+            if not age_confirmed:
+                errors.append('You must confirm that you are 18 years of age'
+                              ' or older.')
 
             if errors:
                 for e in errors:
@@ -462,6 +542,9 @@ def register_routes(app):
                 username=username,
                 email=email,
                 display_name=display_name or username,
+                # Age gate: registration asserts 18+ (required checkbox), so
+                # the account is created already verified for adult content.
+                age_verified=bool(age_confirmed),
             )
             user.set_password(password)
 
@@ -471,6 +554,10 @@ def register_routes(app):
             db.session.commit()
 
             login_user(user)
+            # Mirror the assertion in the session so any view that checks the
+            # short-lived ``age_ok`` flag agrees with the stored attribute.
+            if age_confirmed:
+                session['age_ok'] = True
             flash('Account created successfully!', 'success')
             return redirect(url_for('dashboard'))
 
@@ -567,6 +654,11 @@ def register_routes(app):
                 # Contact form opt-out checkbox.
                 current_user.contact_disabled = bool(
                     request.form.get('contact_disabled'))
+                # Directory visibility preference (privacy toggle). When off,
+                # none of this user's links are listed on /directory; personal
+                # websites never appear there regardless of this setting.
+                current_user.directory_visible = bool(
+                    request.form.get('directory_visible'))
                 avatar_url = (request.form.get('avatar_url') or '').strip()
                 if avatar_url:
                     current_user.avatar_url = avatar_url
@@ -788,7 +880,210 @@ def register_routes(app):
             return redirect(url_for('public_profile', username=user.username))
         if request.form.get('confirm') == 'yes':
             session['age_ok'] = True
+            # Remember verification on the account too, so a logged-in user
+            # who is 18+ is never gated again (used by /directory & /mature).
+            if current_user.is_authenticated and not current_user.age_verified:
+                current_user.age_verified = True
+                db.session.commit()
         return redirect(url_for('public_profile', username=user.username))
+
+    # ------------------------------------------------------------------
+    # Public Link Source master directory (/directory)
+    # ------------------------------------------------------------------
+    # Browsable index of the admin-managed Link Sources ("Social Networks")
+    # with member counts. Rules baked into this route:
+    #   * personal-website sources are never listed (LinkSource.NON_DIRECTORY_SOURCES),
+    #   * only links whose owner opted in (User.directory_visible) count,
+    #   * adult sources/cards are hidden from guests and from logged-in users
+    #     who have not been verified as 18+.
+    # ------------------------------------------------------------------
+
+    DIRECTORY_PER_PAGE = 24
+
+    def _directory_member_ids(include_adult):
+        """Ids of users with at least one directory-listable link."""
+        q = (db.session.query(Link.user_id)
+             .join(User, User.id == Link.user_id)
+             .filter(Link.is_active.is_(True),
+                     User.directory_visible.is_(True)))
+        ids = LinkSource.directory_source_ids(include_adult=include_adult)
+        if ids:
+            q = q.filter(Link.source_id.in_(ids))
+        else:
+            return set()
+        return {row[0] for row in q.distinct().all()}
+
+    def _directory_card(src, member_ids):
+        n_members = (Link.query
+                     .filter(Link.source_id == src.id,
+                             Link.is_active.is_(True),
+                             Link.user_id.in_(member_ids))
+                     .with_entities(func.count(Link.id)).scalar() or 0)
+        return {
+            'source': src,
+            'members': n_members,
+            'bg': src.bg_color or '#f8f9fa',
+            'text': readable_text_color(src.bg_color, src.text_color),
+            'border': src.border_color or '#dee2e6',
+            'icon': f'bi bi-{src.icon_code or "link-45deg"}',
+        }
+
+    @app.route('/directory')
+    def directory():
+        """Master directory of available Link Sources (social networks)."""
+        include_adult = directory_adult_ok()
+        sources = LinkSource.visible_to(include_adult)
+        directory_sources = [s for s in sources if not s.is_directory_excluded]
+        member_ids = _directory_member_ids(include_adult)
+        cards = [_directory_card(s, member_ids) for s in directory_sources]
+        # Alphabetical ordering by display name (brand colors come from the
+        # source record; see templates/directory.html).
+        cards.sort(key=lambda c: (c['source'].name or '').casefold())
+        total_pages = max(1, -(-len(cards) // DIRECTORY_PER_PAGE))
+        page = max(1, request.args.get('page', 1, type=int))
+        page = min(page, total_pages)
+        start = (page - 1) * DIRECTORY_PER_PAGE
+        return render_template('directory.html',
+                               cards=cards[start:start + DIRECTORY_PER_PAGE],
+                               page=page, total_pages=total_pages,
+                               total_sources=len(cards),
+                               total_members=len(member_ids),
+                               include_adult=include_adult,
+                               gated_adult=bool(len(sources) > len(directory_sources)))
+
+    @app.route('/directory/age-gate', methods=['POST'])
+    def directory_age_gate():
+        """One-time 18+ confirmation that unlocks adult directory cards."""
+        if not current_user.is_authenticated:
+            flash('Please log in to view 18+ networks.', 'info')
+            return redirect(url_for('login', next=url_for('directory')))
+        if request.form.get('confirm') == 'yes':
+            session['age_ok'] = True
+            if not current_user.age_verified:
+                current_user.age_verified = True
+                db.session.commit()
+            flash('Adult networks are now visible.', 'success')
+        return redirect(url_for('directory'))
+
+    # ------------------------------------------------------------------
+    # Link Source detail page (/directory/<slug>)
+    # ------------------------------------------------------------------
+    # Lists the member profiles associated with one network. Ordering rules:
+    #   1. Paying users (any PAID_TIERS account, or an admin-pinned
+    #      ``User.is_featured`` account) occupy the "featured" slots at the
+    #      top — at most Setting('directory_featured_max', default 5) of
+    #      them, chosen at random on every request.
+    #   2. Everyone else is listed alphabetically by display name, paginated
+    #      with the admin-configurable Setting('directory_page_size').
+    # Card contents (name, avatar thumbnail, external network-profile link,
+    # and an "AMP Profile" link to the local site profile) are rendered by
+    # templates/directory_source.html from the dicts built below.
+    # ------------------------------------------------------------------
+
+    DIRECTORY_FEATURED_MAX_DEFAULT = 5
+    DIRECTORY_PAGE_SIZE_DEFAULT = 24
+
+    def _directory_settings():
+        """Admin-tunable directory display settings (clamped, safe)."""
+        per_page = Setting.get_int('directory_page_size',
+                                   DIRECTORY_PAGE_SIZE_DEFAULT)
+        featured_max = Setting.get_int('directory_featured_max',
+                                       DIRECTORY_FEATURED_MAX_DEFAULT)
+        return max(1, min(per_page, 200)), max(0, min(featured_max, 20))
+
+    def _directory_profile_rows(src, member_ids):
+        """One row per opted-in member who lists an active link on ``src``.
+
+        Returns dicts carrying the user, their representative link for this
+        network, and the tier info needed for featured/alphabetical split.
+        """
+        rows = (Link.query
+                .filter(Link.source_id == src.id,
+                        Link.is_active.is_(True),
+                        Link.user_id.in_(member_ids or {-1}))
+                .all())
+        seen, out = set(), []
+        for link in rows:
+            owner = link.owner
+            if owner is None or owner.id in seen:
+                continue
+            # Prefer the link whose URL host actually matches this source so
+            # the card's external link points at the right network profile.
+            best = link
+            for other in rows:
+                if other.user_id != owner.id:
+                    continue
+                if (other.matched_source is not None
+                        and other.matched_source.id == src.id
+                        and best.matched_source is None):
+                    best = other
+            seen.add(owner.id)
+            out.append({
+                'user': owner,
+                'link': best,
+                'paid': owner.tier in PAID_TIERS,
+                'featured': bool(getattr(owner, 'is_featured', False)),
+            })
+        # Collapse duplicates defensively (one entry per member).
+        deduped, done = [], set()
+        for row in out:
+            if row['user'].id in done:
+                continue
+            done.add(row['user'].id)
+            deduped.append(row)
+        return deduped
+
+    @app.route('/directory/<path:source_name>')
+    def directory_source(source_name):
+        """Member listing / Link Source detail page."""
+        include_adult = directory_adult_ok()
+        slug = (source_name or '').strip().lower()
+        src = next((s for s in LinkSource.visible_to(include_adult)
+                    if source_slug(s.name) == slug), None)
+        if src is None or src.is_directory_excluded:
+            abort(404)
+
+        per_page, featured_max = _directory_settings()
+        member_ids = _directory_member_ids(include_adult)
+        rows = _directory_profile_rows(src, member_ids)
+
+        # 1) Featured: paying accounts (+ admin-pinned ones), max N at random.
+        pool = [r for r in rows if r['paid'] or r['featured']]
+        random.shuffle(pool)
+        featured = pool[:featured_max]
+        featured_ids = {r['user'].id for r in featured}
+
+        # 2) The rest alphabetically by display name (username breaks ties).
+        rest = sorted((r for r in rows if r['user'].id not in featured_ids),
+                      key=lambda r: ((r['user'].display_name or
+                                       r['user'].username).casefold(),
+                                      r['user'].username))
+
+        total_pages = max(1, -(-len(rest) // per_page))
+        try:
+            page = int(request.args.get('page', 1))
+        except (TypeError, ValueError):
+            page = 1
+        page = min(max(1, page), total_pages)
+        start = (page - 1) * per_page
+        members = rest[start:start + per_page]
+
+        return render_template(
+            'directory_source.html',
+            source=src,
+            card=_directory_card(src, member_ids),
+            text=readable_text_color(src.bg_color, src.text_color),
+            site_name='AllMyProfiles',
+            featured=featured,
+            members=members,
+            page=page,
+            total_pages=total_pages,
+            total_members=len(rows),
+            total_rest=len(rest),
+            per_page=per_page,
+            include_adult=include_adult,
+            page_args={'page': page} if page != 1 else {},
+        )
 
     # Convenience alias so bare /<username> also works (kept last so it
     # never shadows the routes above).
@@ -1433,13 +1728,25 @@ def register_admin_routes(app):
         if real and user.id == real.id:
             flash("You can't change your own admin flag.", 'warning')
             return redirect(url_for('admin_users'))
-        flag = request.form.get('flag')  # 'is_admin'
+        flag = request.form.get('flag')  # 'is_admin' | 'is_featured'
         if flag == 'is_admin':
             user.is_admin = not user.is_admin
             Activity.record('admin_flag_change', user=user, actor=real,
                             detail='granted' if user.is_admin else 'revoked')
             db.session.commit()
             flash('User updated.', 'success')
+        elif flag == 'is_featured':
+            # Manual override for the /directory/<source> featured slots.
+            # Paying accounts already get featured placement automatically;
+            # this pin lets admins feature a free account (or hide one that
+            # is opted out of the directory anyway).
+            user.is_featured = not bool(getattr(user, 'is_featured', False))
+            Activity.record('admin_flag_change', user=user, actor=real,
+                            detail='featured' if user.is_featured
+                                   else 'unfeatured')
+            db.session.commit()
+            flash(f'{user.username}: directory featured '
+                  f'{"on" if user.is_featured else "off"}.', 'success')
         else:
             flash('Unknown flag.', 'danger')
         return redirect(request.referrer or url_for('admin_users'))
@@ -1480,9 +1787,11 @@ def register_admin_routes(app):
     def admin_settings():
         editable = ['free_tier_max_links', 'expanded_tier_max_links',
                     'site_tagline', 'max_upload_size_kb',
-                    'link_check_notify_days']
+                    'link_check_notify_days',
+                    'directory_page_size', 'directory_featured_max']
         numeric = {'free_tier_max_links', 'expanded_tier_max_links',
-                   'max_upload_size_kb', 'link_check_notify_days'}
+                   'max_upload_size_kb', 'link_check_notify_days',
+                   'directory_page_size', 'directory_featured_max'}
         if request.method == 'POST':
             for key in editable:
                 value = request.form.get(key)
@@ -2038,8 +2347,13 @@ def register_link_category_routes(app):
         except ValueError:
             sort_order = 0
 
+        # Display-control flag (checkbox posts 'on' when ticked). Free-tier
+        # users should not see adult content; this marks the category as
+        # 18+ so gating logic (and next-phase tier features) can hide it.
+        is_adult = bool(form.get('is_adult'))
+
         cleaned = {'name': name, 'icon_code': icon_code,
-                   'sort_order': sort_order, **colors}
+                   'sort_order': sort_order, 'is_adult': is_adult, **colors}
         return errors, cleaned
 
     @app.route('/admin/link-categories')
@@ -2881,6 +3195,7 @@ def register_seo_routes(app):
             ('/help', 'weekly', '0.6'),
             ('/contact', 'monthly', '0.4'),
             ('/ai-grounding', 'weekly', '0.7'),
+            ('/directory', 'daily', '0.9'),
             ('/terms', 'yearly', '0.2'),
             ('/privacy', 'yearly', '0.2'),
         ]
@@ -2987,7 +3302,7 @@ def register_template_context(app):
         # inbox, admin) is noindex,nofollow so bots never see private state.
         PUBLIC_INDEXABLE = {'home', 'public_profile', 'public_profile_alias',
                             'help_center', 'contact', 'terms', 'privacy',
-                            'ai_grounding'}
+                            'ai_grounding', 'directory', 'directory_source'}
         endpoint = request.endpoint
         noindex = (endpoint not in PUBLIC_INDEXABLE) or _is_impersonating()
         if noindex:
@@ -3015,6 +3330,8 @@ def register_template_context(app):
             'site_url': site_url,
             'site_name': 'AllMyProfiles',
             'page_robots': page_robots,
+            # Public navigation / footer links (directory of Link Sources).
+            'source_slug': source_slug,
         }
 
 
