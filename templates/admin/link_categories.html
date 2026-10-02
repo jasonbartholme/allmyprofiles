@@ -46,6 +46,7 @@
             </td>
             <td class="fw-semibold">
               {{ c.name }}
+              {% if c.is_adult %}<span class="badge text-bg-danger ms-1" title="Adult category (18+) — hidden from Free-tier users">18+</span>{% endif %}
               {% if c.name == 'Other' %}<span class="badge text-bg-secondary ms-1" title="Fallback bucket — cannot be deleted or renamed">protected</span>{% endif %}
             </td>
             <td><small class="text-muted">bi-{{ c.icon_code or 'tag' }}</small></td>
