@@ -109,7 +109,11 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
 
     # Profile customization fields
-    display_name = db.Column(db.String(120), nullable=False)
+    # Display Name doubles as the public profile handle: the SEO-friendly
+    # URL is /u/<display-name-slug>, so it must be provided at signup and
+    # be unique across all claimed display names (case-insensitive).
+    display_name = db.Column(db.String(120), nullable=True, unique=True,
+                             index=True)
     headline = db.Column(db.String(250), nullable=True)
     bio = db.Column(db.Text, nullable=True)
     about_section = db.Column(db.Text, nullable=True)
