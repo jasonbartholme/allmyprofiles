@@ -1,45 +1,85 @@
-# Public Directory Feature Bundle
+# Link Source descriptions + fix `Map.static_folder` crash
 
-Implements five linked stories building the public Link Source directory, its privacy and age-gating controls, and the source detail pages with sidebar content.
+## Summary
 
-## Stories covered
+Two changes on this branch:
 
-### 1. `is_adult` flag on Link Categories
-- New boolean data field `LinkCategory.is_adult`, defaulting to **FALSE**, editable via the admin category form (`/admin/link-categories/<id>/edit`) with a toggle switch and shown as an "18+" badge in the admin list.
-- Foundation for tier-based display control (free-tier users will not see adult content) and next-phase features.
+1. **New `description` field on the `LinkSource` object** — a 20–50 word blurb about each
+   website, rendered as the first element under the H1 on the directory templates.
+2. **Bug fix:** `AttributeError: 'Map' object has no attribute 'static_folder'` raised on the
+   local instance (Werkzeug ≥ 2.2 removed that attribute from the routing `Map`).
 
-### 2. Directory Visibility Preference (User Dashboard)
-- New `User.directory_visible` boolean (default FALSE / opt-in) persisted from a dashboard toggle ("List me in the public directory").
-- Single eligibility predicate `Link.is_directory_eligible`: active link + owner opted in + live source + **personal websites strictly excluded** (`LinkSource.NON_DIRECTORY_SOURCES`) regardless of toggle state.
+---
 
-### 3. Link Source Master Directory Page (`/directory`)
-- H1 **"Social Networks"** with descriptive lead text.
-- Link Sources rendered as cards ordered alphabetically, styled with their brand colors (WCAG-AA-safe text via `readable_text_color()`), showing icon, category, and live member count.
-- Adult network cards hidden from guests and from logged-in users who are not 18+ verified; visible to verified users/admins with a red "18+" badge and an "I am 18+" unlock flow.
+## 1. Link Source description field
 
-### 4. User Object Addition & Age Gate
-- Registration form includes a **required** "I confirm that I am 18 years of age or older" checkbox, validated server-side.
-- Persisted as `User.age_verified` (Boolean, NOT NULL, server_default `'0'`); mirrored into `session['age_ok']`.
-- Enforcement: adult content requires a logged-in account (free tier is enough — no profile creation required) **and** 18+ verification (`User.can_view_adult()` / `directory_adult_ok()`). Admin user list shows verification status badges.
+### Model (`models.py`)
+- Added `LinkSource.description = db.Column(db.String(500), nullable=True)`.
+- New constants `DESCRIPTION_MIN_WORDS = 20` / `DESCRIPTION_MAX_WORDS = 50` and
+  `LinkSource.validate_description()`, which returns an error message when the text is
+  missing or outside the 20–50 word range.
+- Every entry in `DEFAULT_LINK_SOURCES` now carries a unique 20–50 word description of the
+  website, so freshly seeded databases are populated automatically.
+- `LinkSource.seed_descriptions()` backfills descriptions for existing installs where the
+  column was added by migration and rows already exist (idempotent; only fills empty ones).
 
-### 5. Link Source Detail Page (`/directory/<slug>`) + Sidebar Sections
-- Dynamic route per source, e.g. `/directory/github`; H1 follows the naming pattern (e.g. "GitHub Profiles on All My Profiles").
-- Up to **5 paying users slotted at random at the top**, non-paying users listed alphabetically below with **admin-configurable page size**.
-- Cards show user name, small avatar thumbnail, external-link icon to their network profile, and an "AMP Profile" link to their local site profile.
-- Sidebar: **"Most Popular on AMP"** (top 10 by click traffic from cached data flushed nightly), **directory FAQ** (how to get listed: create account → add links → enable directory visibility), **"Create an account" CTA card** for guests, plus "Other Networks" quick-filter links.
+### Admin UI
+- `templates/admin/link_source_form.html`: required "Website description" textarea with help
+  text explaining the 20–50 word constraint and where it is displayed.
+- `templates/admin/link_sources.html`: new "Description" column with truncated preview plus
+  badges/warnings when a source has no description or an invalid word count.
+- Validation wired into the admin create/edit handlers in `app.py`
+  (`register_link_source_routes`).
 
-## Schema changes
-| Table | Column | Type | Default |
-|---|---|---|---|
-| `link_categories` | `is_adult` | BOOLEAN | FALSE |
-| `users` | `directory_visible` | BOOLEAN NOT NULL | FALSE (`server_default '0'`) |
-| `users` | `age_verified` | BOOLEAN NOT NULL | FALSE (`server_default '0'`) |
+### Directory template
+- `templates/directory_source.html`: renders `{{ source.description }}` as a `<p>` directly
+  below the page H1 (guarded by `{% if %}` so pages without a description are unaffected).
 
-Dev databases are upgraded automatically via the `_ensure_schema()` helper (`ALTER TABLE ... ADD COLUMN`). A production Alembic migration should be generated before deploy (`flask db migrate -m "directory feature bundle"`).
+### Schema / data portability
+- `_ensure_schema` in `app.py` adds the nullable column for dev databases.
+- `catalogue_io.py` export/import round-trips the new field.
 
-## Testing
-- `test_directory_smoke.py` — covers all ACs across the five stories: guest vs. unverified vs. verified adult visibility, opt-in/opt-out directory behavior, personal-website exclusion, alphabetical brand-color cards, featured paying slots, pagination config, sidebar sections.
-- `app.py` / `models.py` pass syntax checks; existing smoke tests (`test_homepage_smoke.py`, `test_messaging_smoke.py`, `test_catalogue_import_smoke.py`) unaffected.
+---
 
-## Housekeeping
-- Untracked `__pycache__/` and `instance/*.db` artifacts (they were previously committed); `.gitignore` updated accordingly.
+## 2. Fix: `'Map' object has no attribute 'static_folder'`
+
+`reserved_root_names()` (used to compute which first URL segments may not be claimed by a
+Display Name slug) ended with:
+
+```python
+names.add(url_map.static_folder and 'static' or 'static')
+```
+
+`werkzeug.routing.Map` exposed `static_folder` up to Werkzeug 2.1; it was removed afterwards,
+so on the installed Werkzeug 3.x every request that computed the reserved-name set crashed
+with `AttributeError`.
+
+Fixed in `app.py` by looking the attribute up defensively:
+
+```python
+static_folder = getattr(url_map, 'static_folder', None)
+if static_folder:
+    names.add(static_folder.strip('/').lower())
+```
+
+Behaviour is unchanged: on newer Werkzeug the `/static/<path:filename>` rule is already picked
+up by the `iter_rules()` loop above, and on older versions the static folder's first segment
+is still reserved explicitly.
+
+---
+
+## Verification
+
+- `create_app('development')` boots cleanly against a fresh SQLite DB — no `AttributeError`;
+  `reserved_root_names()` includes `static` and `is_reserved_route_segment('static')` is True.
+- `GET /` → 200, `GET /directory` → 200, `GET /directory/amazon-storefront` → 200.
+- All 28 seeded link sources have a description, and the detail page renders it as the first
+  element after the `<h1>`:
+  > *An Amazon Storefront curates the products a creator or business recommends into shoppable
+  > lists, wishlists, and brand pages. Linking yours lets visitors buy the gear you actually
+  > use while giving you affiliate credit for the referrals your content generates.*
+
+### Note on pre-existing test failures
+`test_directory_smoke.py` (UNIQUE constraint on `link_sources.name` during its own seeding)
+and `test_homepage_smoke.py` (`BuildError: public_profile ... 'handle'`) fail identically on
+the base commit `446f8db` — they are unrelated to this branch and were left untouched.
