@@ -136,7 +136,12 @@ def reserved_root_names():
                 # Catch-all style rules (e.g. /<handle>) never reserve a name.
                 continue
             names.add(first.lower())
-        names.add(url_map.static_folder and 'static' or 'static')
+        # Werkzeug >= 2.2 removed ``Map.static_folder`` (the static route is
+        # now just another rule in the map, so the loop above already covers
+        # it). Guard the lookup for backwards compatibility.
+        static_folder = getattr(url_map, 'static_folder', None)
+        if static_folder:
+            names.add(static_folder.strip('/').lower())
     frozen = frozenset(names)
     _RESERVED_ROOT_CACHE['names'] = frozen
     return frozen
