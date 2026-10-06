@@ -3154,6 +3154,13 @@ def register_link_source_routes(app):
             errors.append(f'Unknown category "{category}". Create it under '
                           f'Admin → Link Categories first.')
         cta = (form.get('cta') or '').strip()[:40]
+        # Directory blurb: rendered as the first element under the H1 on the
+        # directory templates, so it must be a unique-ish 20-50 word summary
+        # of the website itself (see LinkSource.validate_description).
+        description = re.sub(r'\s+', ' ', form.get('description') or '').strip()
+        desc_error = LinkSource.validate_description(description)
+        if desc_error:
+            errors.append(desc_error)
         try:
             sort_order = int(form.get('sort_order') or 0)
         except ValueError:
@@ -3163,6 +3170,7 @@ def register_link_source_routes(app):
             'name': name, 'domains': domains, 'url': url,
             'profile_pattern': pattern, 'icon_code': icon_code,
             'category': category, 'cta': cta, 'sort_order': sort_order,
+            'description': description,
             'is_active': form.get('is_active') == 'on',
             'is_adult': form.get('is_adult') == 'on',
             'is_nofollow': form.get('is_nofollow') == 'on',

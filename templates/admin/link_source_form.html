@@ -50,6 +50,16 @@
         {{ field('cta', 'Button label (CTA)', value=src.cta if src else '', maxlength=40,
                  help='e.g. Follow, Subscribe, View Repo. Defaults to "Visit" when blank.') }}
 
+        <div class="col-12">
+          <label class="form-label fw-semibold" for="description">Website description</label>
+          <textarea class="form-control" id="description" name="description" rows="3"
+                    maxlength="500" required>{{ form.get('description') if form else (src.description if src else '') }}</textarea>
+          <div class="form-text">
+            20&ndash;50 words describing this website. Rendered as the first element under the
+            H1 on the public directory pages, so keep it factual and unique to this network.
+          </div>
+        </div>
+
         {{ field('icon_code', 'Bootstrap icon code', value=src.icon_code if src else '',
                  help='Slug from icons.getbootstrap.com without the "bi-" prefix, e.g. github, youtube. Used unless a custom icon is uploaded.') }}
 

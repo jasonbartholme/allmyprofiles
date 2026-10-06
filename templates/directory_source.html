@@ -62,6 +62,10 @@
           {{ source.name }} Profiles on {{ site_name }}
           {% if source.is_adult_effective %}<span class="badge text-bg-danger align-middle">18+</span>{% endif %}
         </h1>
+        {# Top element under the H1: the Link Source website description #}
+        {% if source.description %}
+        <p class="mb-2" style="color: {{ text }}; max-width: 60rem;">{{ source.description }}</p>
+        {% endif %}
         <p class="mb-0 small" style="color: {{ text }}; opacity:.8;">
           {{ total_members }} public member profile{{ '' if total_members == 1 else 's' }}
           on {{ source.name }}{% if source.category %} · {{ source.category }}{% endif %}

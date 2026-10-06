@@ -36,6 +36,7 @@
             <th>Preview</th>
             <th>Name</th>
             <th>Domains</th>
+            <th>Description</th>
             <th>Category</th>
             <th>CTA</th>
             <th title="Distinct users with a link using this source">Users</th>
@@ -65,6 +66,20 @@
               {% if s.is_nofollow %}<span class="badge text-bg-info ms-1">nofollow</span>{% endif %}
             </td>
             <td><small class="text-muted">{{ s.domains or '—' }}</small></td>
+            <td style="max-width: 26rem">
+              {% if s.description %}
+                <small class="text-muted" title="{{ s.description }}">
+                  {{ s.description|wordwrap(140, wrapstring=' ')[:140] }}
+                  {% if s.description|length > 140 %}&hellip;{% endif %}
+                </small>
+                {% if not s.description_is_valid %}
+                <span class="badge text-bg-warning ms-1"
+                      title="Directory copy should be 20-50 words">{{ s.description_word_count(s.description) }}w</span>
+                {% endif %}
+              {% else %}
+                <small class="text-danger">Missing — needed for directory pages</small>
+              {% endif %}
+            </td>
             <td>{{ s.category }}</td>
             <td><small>{{ s.cta or 'Visit' }}</small></td>
             <td><span class="badge rounded-pill text-bg-secondary">{{ row.users }}</span></td>
@@ -90,7 +105,7 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="10" class="text-center text-muted py-4">No sources yet — create one.</td></tr>
+          <tr><td colspan="11" class="text-center text-muted py-4">No sources yet — create one.</td></tr>
         {% endfor %}
         </tbody>
       </table>
