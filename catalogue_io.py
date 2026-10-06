@@ -113,6 +113,10 @@ def _clean_pattern(value):
 
 ICON_SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,48}$')
 
+# Collapse runs of whitespace in free-text fields (descriptions) so the
+# word-count contract is applied to what the template will actually render.
+DESCRIPTION_RE = re.compile(r'\s+')
+
 
 def _clean_icon(value, default):
     v = _clean_str(value, 50).lower()
@@ -129,7 +133,7 @@ def _clean_icon(value, default):
 SOURCE_EXPORT_FIELDS = (
     'name', 'domains', 'url', 'profile_pattern', 'bg_color', 'text_color',
     'border_color', 'icon_code', 'is_nofollow', 'cta', 'category',
-    'sort_order', 'is_active', 'is_adult',
+    'sort_order', 'is_active', 'is_adult', 'description',
 )
 CATEGORY_EXPORT_FIELDS = ('name', 'icon_code', 'bg_color', 'text_color',
                           'sort_order')
@@ -210,6 +214,16 @@ def _normalize_source_entry(entry, idx, errors, seen):
         data['icon_code'] = _clean_icon(entry.get('icon_code'), 'link-45deg')
         data['category'] = _clean_str(entry.get('category'), 40) or 'Other'
         data['cta'] = _clean_str(entry.get('cta'), 40)
+        # Directory blurb (20-50 words). Optional on import so older export
+        # files keep working; when present it must satisfy the same rules
+        # the admin form enforces.
+        description = DESCRIPTION_RE.sub(
+            ' ', _clean_str(entry.get('description'), 500)).strip()
+        if description:
+            problem = LinkSource.validate_description(description)
+            if problem:
+                raise ValueError(problem.replace('Description', 'description'))
+        data['description'] = description
         data['sort_order'] = _clean_int(entry.get('sort_order'), idx)
         data['is_active'] = _clean_bool(entry.get('is_active'), True)
         data['is_adult'] = _clean_bool(entry.get('is_adult'), False)
