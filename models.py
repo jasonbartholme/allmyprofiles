@@ -109,7 +109,11 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
 
     # Profile customization fields
-    display_name = db.Column(db.String(120), nullable=False)
+    # Display Name doubles as the public profile handle: the SEO-friendly
+    # URL is /u/<display-name-slug>, so it must be provided at signup and
+    # be unique across all claimed display names (case-insensitive).
+    display_name = db.Column(db.String(120), nullable=True, unique=True,
+                             index=True)
     headline = db.Column(db.String(250), nullable=True)
     bio = db.Column(db.Text, nullable=True)
     about_section = db.Column(db.Text, nullable=True)
@@ -603,39 +607,74 @@ DEFAULT_LINK_CATEGORIES = [
     ('Other',        'tag',          '#f8f9fa', '#212529'),
 ]
 
+# Directory blurb length limits (words) enforced by
+# ``LinkSource.validate_description()`` and documented for admins.
+DESCRIPTION_MIN_WORDS = 20
+DESCRIPTION_MAX_WORDS = 50
+
 DEFAULT_LINK_SOURCES = [
-    # name, domains (comma-sep), bg, text, border, bootstrap icon, category
-    ('GitHub',    'github.com,gitlab.com',            '#24292e', '#ffffff', '#24292e', 'github',        'Gaming & Dev'),
-    ('Steam',     'store.steampowered.com,steamcommunity.com', '#1b2838', '#c7d5e0', '#171a21', 'steam', 'Gaming & Dev'),
-    ('Xbox Live', 'xbox.com,xboxlive.com',            '#107c10', '#ffffff', '#0b5a0b', 'controller',    'Gaming & Dev'),
-    ('PlayStation Network', 'playstation.com',        '#00439c', '#ffffff', '#002d6b', 'controller',    'Gaming & Dev'),
-    ('Discord',   'discord.gg,discord.com',           '#5865f2', '#ffffff', '#4752c4', 'discord',       'Social'),
-    ('YouTube',   'youtube.com,youtu.be',             '#ff0000', '#ffffff', '#cc0000', 'youtube',       'Content'),
-    ('Twitch',    'twitch.tv',                        '#9146ff', '#ffffff', '#772ce8', 'twitch',        'Content'),
-    ('Vimeo',     'vimeo.com',                        '#1ab7ea', '#ffffff', '#1494bd', 'vimeo',         'Content'),
-    ('Medium',    'medium.com',                       '#12100e', '#ffffff', '#000000', 'medium',        'Content'),
-    ('Substack',  'substack.com',                     '#ff6719', '#ffffff', '#d95511', 'envelope-paper', 'Content'),
-    ('Spotify',   'spotify.com',                      '#1db954', '#0b2a14', '#169c46', 'spotify',       'Music'),
-    ('Apple Music','music.apple.com',                 '#fa243c', '#ffffff', '#c91e31', 'apple-music',   'Music'),
-    ('SoundCloud','soundcloud.com',                   '#ff5500', '#ffffff', '#d64800', 'cloud-fill',    'Music'),
-    ('Bandcamp',  'bandcamp.com',                     '#629aa9', '#ffffff', '#4f7d87', 'music-note-beamed', 'Music'),
-    ('X / Twitter','twitter.com,x.com',               '#000000', '#ffffff', '#333333', 'twitter-x',     'Social'),
-    ('LinkedIn',  'linkedin.com',                     '#0a66c2', '#ffffff', '#085299', 'linkedin',      'Social'),
-    ('Reddit',    'reddit.com',                       '#ff4500', '#ffffff', '#d63a00', 'reddit',        'Social'),
-    ('Quora',     'quora.com',                        '#b92b27', '#ffffff', '#97231f', 'question-circle', 'Social'),
-    ('Facebook',  'facebook.com',                     '#1877f2', '#ffffff', '#125ecc', 'facebook',      'Social'),
-    ('Instagram', 'instagram.com',                    '#c13584', '#ffffff', '#9a2a69', 'instagram',     'Social'),
-    ('TikTok',    'tiktok.com',                       '#010101', '#ffffff', '#25f4ee', 'camera-reels',  'Social'),
-    ('Threads',   'threads.net',                      '#000000', '#ffffff', '#333333', 'at',            'Social'),
-    ('Patreon',   'patreon.com',                      '#f96854', '#ffffff', '#c94f3f', 'heart-fill',    'Store'),
-    ('Ko-fi',     'ko-fi.com',                        '#ff5e5b', '#ffffff', '#d94c49', 'cup-hot',       'Store'),
-    ('Buy Me a Coffee', 'buymeacoffee.com',           '#ffd43b', '#2b2b2b', '#e0b92f', 'cash-coin',     'Store'),
-    ('Etsy',      'etsy.com',                         '#f16521', '#ffffff', '#c95119', 'shop',          'Store'),
-    ('Amazon Storefront', 'amazon.com,amzn.to',       '#ff9900', '#131921', '#e08700', 'bag',           'Store'),
-    ('Personal Website', '',                            '#f8f9fa', '#212529', '#dee2e6', 'globe2',      'Portfolio'),
+    # name, domains (comma-sep), bg, text, border, bootstrap icon, category,
+    # description (20-50 words, shown under the H1 on directory templates)
+    ('GitHub',    'github.com,gitlab.com',            '#24292e', '#ffffff', '#24292e', 'github',        'Gaming & Dev',
+     'GitHub is the world\'s largest home for open source code, where developers host repositories, review pull requests, and ship software together. Link your profile here to showcase the projects, contributions, and organisations that define your engineering work.'),
+    ('Steam',     'store.steampowered.com,steamcommunity.com', '#1b2838', '#c7d5e0', '#171a21', 'steam', 'Gaming & Dev',
+     'Steam is Valve\'s PC gaming storefront and social network, bundling a vast game library, community hubs, reviews, and trading cards into one client. Share your Steam profile to let visitors see the games you play and the badges you have earned.'),
+    ('Xbox Live', 'xbox.com,xboxlive.com',            '#107c10', '#ffffff', '#0b5a0b', 'controller',    'Gaming & Dev',
+     'Xbox Live connects console and PC players through gamertags, achievements, parties, and cloud saves across Microsoft\'s gaming ecosystem. A linked profile lets friends find your gamer score, favourite titles, and multiplayer history at a glance.'),
+    ('PlayStation Network', 'playstation.com',        '#00439c', '#ffffff', '#002d6b', 'controller',    'Gaming & Dev',
+     'PlayStation Network is Sony\'s online service for PlayStation consoles, hosting friend lists, trophies, plus subscriptions, and digital game libraries. Linking your PSN profile gives visitors a verified window onto the games you play and the trophies you collect.'),
+    ('Discord',   'discord.gg,discord.com',           '#5865f2', '#ffffff', '#4752c4', 'discord',       'Social',
+     'Discord is a voice, video, and text chat platform built around servers that communities run themselves, from gaming guilds to study groups and dev teams. Add your invite or profile link so people can join the conversations you are already part of.'),
+    ('YouTube',   'youtube.com,youtu.be',             '#ff0000', '#ffffff', '#cc0000', 'youtube',       'Content',
+     'YouTube is the dominant video platform for creators, educators, musicians, and broadcasters, reaching billions of viewers each month. Linking your channel lets audiences jump straight to your uploads, Shorts, live streams, and subscriber milestones without searching.'),
+    ('Twitch',    'twitch.tv',                        '#9146ff', '#ffffff', '#772ce8', 'twitch',        'Content',
+     'Twitch is Amazon\'s live-streaming network, best known for gaming broadcasts but also home to music, art, cooking, and just-chatting creators. A linked channel shows your followers count, streaming schedule, and clips so visitors know exactly when to catch you live.'),
+    ('Vimeo',     'vimeo.com',                        '#1ab7ea', '#ffffff', '#1494bd', 'vimeo',         'Content',
+     'Vimeo is a video hosting platform favoured by filmmakers, animators, and brands for its ad-free player, privacy controls, and high-quality playback standards. Link your account to present curated reels and portfolio pieces in a clean, professional setting.'),
+    ('Medium',    'medium.com',                       '#12100e', '#ffffff', '#000000', 'medium',        'Content',
+     'Medium is a publishing platform where independent writers, engineers, and analysts publish essays and serialized stories to large built-in audiences. Linking your profile highlights your claps, publications, and reading interests, giving readers a direct path to your latest articles.'),
+    ('Substack',  'substack.com',                     '#ff6719', '#ffffff', '#d95511', 'envelope-paper', 'Content',
+     'Substack lets journalists, authors, and specialists run paid or free email newsletters with a simple subscription model and portable audience. Sharing your publication link helps readers sign up directly and discover the other writers you recommend on the network.'),
+    ('Spotify',   'spotify.com',                      '#1db954', '#0b2a14', '#169c46', 'spotify',       'Music',
+     'Spotify is the leading music streaming service, hosting tens of millions of tracks, podcasts, and algorithmic playlists. Linking your artist page or public profile lets fans stream your releases instantly and follow your listening taste, playlists, and monthly listeners.'),
+    ('Apple Music','music.apple.com',                 '#fa243c', '#ffffff', '#c91e31', 'apple-music',   'Music',
+     'Apple Music combines lossless streaming, radio, and deep integration across Apple devices, with artist pages that surface discographies and verified profiles. Link it to send listeners straight to your album releases, singles, and curated playlists in their native app.'),
+    ('SoundCloud','soundcloud.com',                   '#ff5500', '#ffffff', '#d64800', 'cloud-fill',    'Music',
+     'SoundCloud is a creator-first audio platform where DJs, producers, and podcasters upload mixes and demos directly to listeners without label gatekeeping. Your linked profile showcases track counts, plays, and reposts, making it easy for fans to hear your newest experiments.'),
+    ('Bandcamp',  'bandcamp.com',                     '#629aa9', '#ffffff', '#4f7d87', 'music-note-beamed', 'Music',
+     'Bandcamp is an artist-friendly marketplace where musicians sell albums, merch, and direct-to-fan subscriptions while keeping most of the revenue. Linking your page lets supporters buy records, download discographies, and follow tour updates from one fan-funded storefront.'),
+    ('X / Twitter','twitter.com,x.com',               '#000000', '#ffffff', '#333333', 'twitter-x',     'Social',
+     'X, formerly Twitter, is the real-time public square for news, commentary, and niche communities built around short posts and reposts. Adding your handle lets visitors follow your takes, threads, and live event coverage wherever the conversation happens first.'),
+    ('LinkedIn',  'linkedin.com',                     '#0a66c2', '#ffffff', '#085299', 'linkedin',      'Social',
+     'LinkedIn is the professional network where careers, companies, and industry insights live side by side through profiles, endorsements, and articles. Link yours so recruiters, clients, and colleagues can verify your experience, recommendations, and current role in one click.'),
+    ('Reddit',    'reddit.com',                       '#ff4500', '#ffffff', '#d63a00', 'reddit',        'Social',
+     'Reddit is a vast network of topic-focused communities where members vote, discuss, and moderate discussions ranging from hobbies to research. Linking your account shows your post history, awards, and favourite subreddits, proving active participation in the communities you care about.'),
+    ('Quora',     'quora.com',                        '#b92b27', '#ffffff', '#97231f', 'question-circle', 'Social',
+     'Quora is a question-and-answer knowledge network where experts and enthusiasts write long-form answers that keep surfacing in search results. Sharing your profile highlights the topics you explain best, your answer view counts, and any credentials you have verified.'),
+    ('Facebook',  'facebook.com',                     '#1877f2', '#ffffff', '#125ecc', 'facebook',      'Social',
+     'Facebook remains one of the largest social networks for personal pages, interest Groups, local events, and business presence. Linking your public page or profile helps family, customers, and community members find the place where you actually post and organise.'),
+    ('Instagram', 'instagram.com',                    '#c13584', '#ffffff', '#9a2a69', 'instagram',     'Social',
+     'Instagram is a photo and short-video network built around feeds, Stories, Reels, and creator commerce tools. Linking your handle gives visitors instant access to your visual portfolio, follower community, and behind-the-scenes updates from wherever you are shooting.'),
+    ('TikTok',    'tiktok.com',                       '#010101', '#ffffff', '#25f4ee', 'camera-reels',  'Social',
+     'TikTok is the vertical short-video platform whose recommendation engine can turn unknown creators into global names overnight. Add your profile so fans can watch your latest clips, duets, and trending sounds, and follow the series that grow your audience week over week.'),
+    ('Threads',   'threads.net',                      '#000000', '#ffffff', '#333333', 'at',            'Social',
+     'Threads is Meta\'s text-forward social app, tightly connected to Instagram and designed for quick replies, conversations, and public updates. Linking it lets readers continue discussions started elsewhere and follow your day-to-day writing in a calmer, chronological feed.'),
+    ('Patreon',   'patreon.com',                      '#f96854', '#ffffff', '#c94f3f', 'heart-fill',    'Store',
+     'Patreon powers membership businesses: creators offer tiered subscriptions with bonus episodes, early access, and community perks. Linking your campaign shows how many patrons back your work and gives supporters the shortest possible path to a recurring contribution.'),
+    ('Ko-fi',     'ko-fi.com',                        '#ff5e5b', '#ffffff', '#d94c49', 'cup-hot',       'Store',
+     'Ko-fi lets artists, developers, and writers accept one-off tips, run small shops, and offer memberships without taking a cut of donations. Your Ko-fi page is a low-friction way for appreciative visitors to buy you a coffee and support ongoing projects.'),
+    ('Buy Me a Coffee', 'buymeacoffee.com',           '#ffd43b', '#2b2b2b', '#e0b92f', 'cash-coin',     'Store',
+     'Buy Me a Coffee provides a simple support button for creators, adding memberships, digital products, and comment widgets to any site. Linking your page turns casual readers into paying supporters with minimal friction and no complex store setup required.'),
+    ('Etsy',      'etsy.com',                         '#f16521', '#ffffff', '#c95119', 'shop',          'Store',
+     'Etsy is the global marketplace for handmade goods, vintage finds, and craft supplies, run largely by independent studio sellers. Linking your shop lets buyers browse listings, check reviews, and favourite your products without leaving the profile you are already viewing.'),
+    ('Amazon Storefront', 'amazon.com,amzn.to',       '#ff9900', '#131921', '#e08700', 'bag',           'Store',
+     'An Amazon Storefront curates the products a creator or business recommends into shoppable lists, wishlists, and brand pages. Linking yours lets visitors buy the gear you actually use while giving you affiliate credit for the referrals your content generates.'),
+    ('Personal Website', '',                            '#f8f9fa', '#212529', '#dee2e6', 'globe2',      'Portfolio',
+     'Your own domain is the one profile you fully control: a personal website hosts your portfolio, writing, case studies, and contact details without algorithm interference. Link it as the anchor of your footprint so every network points back to your home base.'),
     # 18+ by nature — flagged in ADULT_SOURCE_NAMES so it is seeded with
     # ``is_adult=True`` and hidden from guests / unverified accounts.
-    ('AdultWorld',  'adultworld.example',               '#4d0a0a', '#ffffff', '#2f0606', 'shield-lock', 'Other'),
+    ('AdultWorld',  'adultworld.example',               '#4d0a0a', '#ffffff', '#2f0606', 'shield-lock', 'Other',
+     'AdultWorld is an example adults-only network used to exercise the age-gating rules of this directory. Access requires a logged-in account verified as eighteen or older, and listings from this source stay hidden from guests and unverified visitors entirely.'),
 ]
 
 
@@ -663,6 +702,10 @@ class LinkSource(db.Model):
     is_nofollow = db.Column(db.Boolean, default=False, nullable=False,
                             server_default='0')
     cta = db.Column(db.String(40), nullable=True)       # "Follow", "Subscribe"
+    # Short, admin-written blurb describing the network itself (not a user's
+    # profile). Directory templates render it as the first element under the
+    # H1; keep it between DESCRIPTION_MIN_WORDS and DESCRIPTION_MAX_WORDS.
+    description = db.Column(db.String(500), nullable=True)
     category = db.Column(db.String(40), default='Other', nullable=False)
     sort_order = db.Column(db.Integer, default=0)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
@@ -689,6 +732,44 @@ class LinkSource(db.Model):
     def is_directory_excluded(self):
         """True when links from this source never appear in the directory."""
         return (self.name or '').strip() in self.NON_DIRECTORY_SOURCES
+
+    # ---------------------------------------------------------------
+    # Directory description ("Website Description" field)
+    # ---------------------------------------------------------------
+    @staticmethod
+    def description_word_count(text):
+        """Whitespace-delimited word count used by the 20-50 rule."""
+        return len((text or '').split())
+
+    @classmethod
+    def validate_description(cls, text, label='Description'):
+        """Return an error string when *text* breaks the blurb rules.
+
+        The directory templates render this copy directly under the H1, so
+        it must exist and stay within DESCRIPTION_MIN_WORDS..MAX_WORDS to
+        keep card/page layouts consistent. Returns ``None`` when valid.
+        """
+        words = cls.description_word_count(text)
+        if not words:
+            return (f'{label} is required — write a '
+                    f'{DESCRIPTION_MIN_WORDS}-{DESCRIPTION_MAX_WORDS} word '
+                    f'description of the website for the directory pages.')
+        if words < DESCRIPTION_MIN_WORDS:
+            return (f'{label} is too short ({words} words). Write at least '
+                    f'{DESCRIPTION_MIN_WORDS} words so the directory page '
+                    f'has useful context under the heading.')
+        if words > DESCRIPTION_MAX_WORDS:
+            return (f'{label} is too long ({words} words). Keep it under '
+                    f'{DESCRIPTION_MAX_WORDS} words so it fits the directory '
+                    f'template.')
+        if len(text) > 500:
+            return f'{label} must be 500 characters or fewer.'
+        return None
+
+    @property
+    def description_is_valid(self):
+        """True when the stored description meets the length contract."""
+        return self.validate_description(self.description) is None
 
     # ------------------------------------------------------------------
     # Adult catalogue bootstrap (see "User Object Addition & Age Gate")
@@ -783,18 +864,48 @@ class LinkSource(db.Model):
         return None
 
     @classmethod
+    def seed_descriptions(cls):
+        """Backfill/populate the directory ``description`` field.
+
+        Idempotent and additive-only: a source is written when it has no
+        description yet, or when its current text is still an untouched
+        copy of the seeded default (so admin edits are never stomped).
+        Returns the number of rows changed.
+        """
+        defaults = {row[0]: row[7] for row in DEFAULT_LINK_SOURCES
+                    if len(row) > 7 and row[7]}
+        changed = 0
+        for src in cls.query.all():
+            text = defaults.get((src.name or '').strip())
+            if not text:
+                continue
+            current = src.description or ''
+            stale_default = any(current == d for d in defaults.values())
+            if current and not stale_default:
+                continue  # admin-authored copy wins
+            src.description = text
+            changed += 1
+        if changed:
+            db.session.commit()
+        return changed
+
+    @classmethod
     def seed_defaults(cls):
         """Populate the catalogue on first run (idempotent).
 
         Sources listed in ``ADULT_SOURCE_NAMES`` are created with
         ``is_adult=True``; on an existing database the flags are re-applied
         so a catalogue seeded before this field existed still enforces the
-        18+ directory rules.
+        18+ directory rules. The directory ``description`` blurbs are
+        backfilled the same way (see :meth:`seed_descriptions`).
         """
         if cls.query.first() is not None:
             cls.seed_adult_flags()
+            cls.seed_descriptions()
             return
-        for idx, (name, domains, bg, txt, brd, icon, cat) in enumerate(DEFAULT_LINK_SOURCES):
+        for idx, row in enumerate(DEFAULT_LINK_SOURCES):
+            name, domains, bg, txt, brd, icon, cat = row[:7]
+            description = row[7] if len(row) > 7 else None
             first_domain = (domains or '').split(',')[0].strip()
             url = f'https://{first_domain}/' if first_domain else None
             pattern = (f'https://{first_domain}/{{handle}}'
@@ -802,11 +913,13 @@ class LinkSource(db.Model):
             db.session.add(cls(name=name, domains=domains, bg_color=bg,
                                text_color=txt, border_color=brd,
                                icon_code=icon, category=cat,
+                               description=description,
                                sort_order=idx, url=url,
                                profile_pattern=pattern,
                                is_adult=name in cls.ADULT_SOURCE_NAMES))
         db.session.commit()
         cls.seed_adult_flags()
+        cls.seed_descriptions()
 
 
 HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')

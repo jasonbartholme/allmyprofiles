@@ -60,17 +60,165 @@ RESERVED_USERNAMES = {
 
 USERNAME_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{2,30}$')
 
+# Display Name validation. The Display Name IS the public profile handle —
+# it powers the search-engine-friendly URL /<display-name-slug> — so only
+# plain text and numbers are allowed for now (no email addresses, no
+# punctuation like apostrophes or periods). Spaces separate words and are
+# collapsed into single hyphens in the slug.
+DISPLAY_NAME_ALLOWED_RE = re.compile(r'^[A-Za-z0-9 ]+$')
+DISPLAY_NAME_TEXT_RE = re.compile(r'[A-Za-z0-9]')
+DISPLAY_NAME_MAX_LEN = 60
+
+# Cache for the route-derived reserved-name set (see reserved_root_names()).
+_RESERVED_ROOT_CACHE = {}
+
+
+def display_name_slug(text):
+    """URL-safe handle derived from a Display Name.
+
+    Lowercased, runs of spaces collapse to a single hyphen ("Jane Doe" ->
+    "jane-doe"). Returns '' when nothing alphanumeric survives, which
+    callers treat as "not a valid handle".
+    """
+    slug = re.sub(r'\s+', '-', (text or '').strip().lower())
+    return slug[:64]
+
+
+def is_valid_display_name_format(text):
+    """True when a Display Name is well-formed (text/numbers only + slugs)."""
+    text = (text or '').strip()
+    if len(text) < 3 or len(text) > DISPLAY_NAME_MAX_LEN:
+        return False
+    # Reject anything resembling an email address — display names must be
+    # human-readable names, never contact addresses.
+    if '@' in text:
+        return False
+    if not DISPLAY_NAME_ALLOWED_RE.match(text):
+        return False
+    if not display_name_slug(text):
+        return False
+    # The slug itself must look like a clean handle: letters, numbers and
+    # single-hyphen word joins only — starts/ends alphanumeric, never a
+    # reserved system path segment.
+    slug = display_name_slug(text)
+    if not re.match(r'^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$', slug):
+        return False
+    if slug in RESERVED_USERNAMES:
+        return False
+    return True
+
+
+def reserved_root_names():
+    """First URL path segments claimed by system / application routes.
+
+    Public profiles now live at the root of the domain (``/<display-name>``)
+    so they can be search-engine friendly, which means every other route
+    competes with them for the first segment. This set is computed from the
+    live url_map (plus the static-folder prefix), so anything the platform
+    registers — now or later — is automatically off-limits as a Display
+    Name slug. Results are cached once the url_map is sealed (first request).
+    """
+    cached = _RESERVED_ROOT_CACHE.get('names')
+    if cached is not None:
+        return cached
+    names = set(RESERVED_USERNAMES)
+    try:
+        from flask import current_app
+        url_map = current_app.url_map
+    except Exception:
+        url_map = None
+    if url_map is not None:
+        for rule in url_map.iter_rules():
+            parts = [p for p in rule.rule.split('/') if p]
+            if not parts:
+                continue
+            first = parts[0]
+            if first.startswith('<'):
+                # Catch-all style rules (e.g. /<handle>) never reserve a name.
+                continue
+            names.add(first.lower())
+        # Werkzeug >= 2.2 removed ``Map.static_folder`` (the static route is
+        # now just another rule in the map, so the loop above already covers
+        # it). Guard the lookup for backwards compatibility.
+        static_folder = getattr(url_map, 'static_folder', None)
+        if static_folder:
+            names.add(static_folder.strip('/').lower())
+    frozen = frozenset(names)
+    _RESERVED_ROOT_CACHE['names'] = frozen
+    return frozen
+
+
+def is_reserved_route_segment(segment):
+    """True when a bare path segment would collide with a system/app route."""
+    seg = (segment or '').strip().lower()
+    if not seg:
+        return False
+    if '.' in seg:  # file-style paths (/llms.txt, /robots.txt, feeds…)
+        return True
+    return seg in reserved_root_names()
+
+
+def display_name_taken(text, exclude_id=None):
+    """Case-insensitive uniqueness check against claimed display names."""
+    wanted = (text or '').strip().casefold()
+    if not wanted:
+        return False
+    for u in User.query.filter(User.display_name.isnot(None)).all():
+        stored = (u.display_name or '').strip().casefold()
+        if not stored:
+            continue
+        if exclude_id is not None and u.id == exclude_id:
+            continue
+        if stored == wanted:
+            return True
+        # Two different names that produce the same URL slug would create
+        # colliding profile URLs ("Jane Doe" vs "jane-doe"), so treat the
+        # slug space as claimed too.
+        if display_name_slug(stored) == display_name_slug(wanted):
+            return True
+    return False
+
+
+def is_claimable_display_name(text, exclude_id=None):
+    """Return (ok, reason) for a desired Display Name / profile handle.
+
+    The Display Name becomes the public profile URL (/<slug>), so it is
+    required at signup, must be unique against every already-claimed name
+    (case-insensitive, slug-aware) and may only contain letters, numbers
+    and spaces — no email addresses, no punctuation.
+    """
+    text = (text or '').strip()
+    if not text:
+        return False, 'A Display Name is required — it becomes your profile URL.'
+    if '@' in text:
+        return False, 'Please use a display name, not an email address.'
+    if len(text) < 3:
+        return False, 'Display name must be at least 3 characters.'
+    if len(text) > DISPLAY_NAME_MAX_LEN:
+        return False, f'Display name must be {DISPLAY_NAME_MAX_LEN} characters or fewer.'
+    if not DISPLAY_NAME_ALLOWED_RE.match(text):
+        return False, ('Only letters, numbers and spaces are allowed in a '
+                       'display name.')
+    slug = display_name_slug(text)
+    if slug in RESERVED_USERNAMES or is_reserved_route_segment(slug):
+        return False, 'This name is reserved. Please pick another.'
+    if display_name_taken(text, exclude_id=exclude_id):
+        return False, 'This display name is already claimed.'
+    return True, 'Available!'
+
 
 def is_claimable_username(username):
-    """Return (ok, reason) for a desired public handle."""
+    """Return (ok, reason) for a desired internal login handle."""
     username = (username or '').strip().lower()
     if not USERNAME_RE.match(username):
         return False, ('Usernames must be 3-31 characters: letters, numbers,'
                        ' hyphens or underscores.')
-    if username in RESERVED_USERNAMES:
+    if username in RESERVED_USERNAMES or is_reserved_route_segment(username):
         return False, 'This name is reserved.'
     if User.query.filter_by(username=username).first():
         return False, 'This name is already taken.'
+    if display_name_taken(username):
+        return False, 'This name is already claimed.'
     return True, 'Available!'
 
 
@@ -242,6 +390,53 @@ def group_links_for_profile(links):
     if 'Other' in categorized:
         ordered['Other'] = categorized.pop('Other')
     return pinned, ordered
+
+
+def profile_handle(user):
+    """Public URL handle for a profile — always derived from the Display Name.
+
+    The canonical profile URL is ``/<display-name-slug>`` (no /u/ prefix —
+    cleaner and more search-engine friendly). Email addresses and raw
+    usernames are never used in public URLs; an account without a Display
+    Name has no public profile at all (callers should 404). Falls back to
+    the legacy username only for accounts that predate the Display-Name
+    rule so old links keep resolving.
+    """
+    slug = display_name_slug(getattr(user, 'display_name', None))
+    return slug or (user.username or '')
+
+
+def url_for_profile(user, **kwargs):
+    """Canonical public-profile URL for a user (Display Name based).
+
+    Templates should use the ``profile_url`` Jinja global instead of
+    calling ``url_for('public_profile', ...)`` with a raw username, so
+    every link on the site stays consistent with the Display-Name URL.
+    Users without a Display Name have no public profile — callers get ''
+    and should hide the link.
+    """
+    if user is None:
+        return ''
+    if not (getattr(user, 'display_name', None) or '').strip():
+        return ''
+    return url_for('public_profile', handle=profile_handle(user), **kwargs)
+
+
+def user_by_handle(handle):
+    """Resolve a public URL handle to a User, or None.
+
+    Matches the Display Name slug first (the canonical form), then falls
+    back to the legacy username lookup for rows created before this story.
+    A bare path segment that belongs to a system/application route is
+    never treated as a profile — real routes always win over profiles.
+    """
+    wanted = (handle or '').strip().lower()
+    if not wanted or is_reserved_route_segment(wanted):
+        return None
+    for u in User.query.filter(User.display_name.isnot(None)).all():
+        if display_name_slug(u.display_name) == wanted:
+            return u
+    return User.query.filter_by(username=wanted).first()
 
 
 def _ensure_schema(db):
@@ -1135,9 +1330,35 @@ def register_routes(app):
 
     @app.route('/api/check-username')
     def check_username():
-        """Live availability lookup used by the home-page claim box."""
-        ok, reason = is_claimable_username(request.args.get('username', ''))
-        return {'available': ok, 'message': reason}
+        """Live availability lookup used by the home-page claim box.
+
+        The public profile URL is derived from the Display Name, so this
+        endpoint validates the typed text with the Display-Name rules and
+        returns the exact /<display-name-slug> URL the visitor would get.
+        """
+        raw = request.args.get('username', '') or ''
+        ok, reason = is_claimable_display_name(raw)
+        if not ok:
+            # A bare slug typed into the claim box ("jane-doe") should also
+            # be checked as a display name in its own right.
+            pretty = raw.strip().replace('-', ' ')
+            ok2, reason2 = is_claimable_display_name(pretty)
+            if ok2:
+                return {'available': True, 'message': reason2,
+                        'url': '/' + display_name_slug(pretty)}
+        return {'available': ok, 'message': reason,
+                'url': ('/' + display_name_slug(raw)) if ok else None}
+
+    @app.route('/api/check-display-name')
+    def check_display_name():
+        """Live Display Name availability for the register / dashboard forms."""
+        ok, reason = is_claimable_display_name(
+            request.args.get('display_name', ''),
+            exclude_id=(current_user.id if current_user.is_authenticated
+                        else None))
+        return {'available': ok, 'message': reason,
+                'url': ('/' + display_name_slug(request.args.get('display_name', ''))
+                        if ok else None)}
 
     @app.route('/register', methods=['GET', 'POST'])
     def register():
@@ -1145,23 +1366,23 @@ def register_routes(app):
             return redirect(url_for('dashboard'))
 
         if request.method == 'POST':
-            username = (request.form.get('username') or '').strip().lower()
             email = (request.form.get('email') or '').strip().lower()
             password = request.form.get('password') or ''
             display_name = (request.form.get('display_name') or '').strip()
+            # The Display Name is REQUIRED: it becomes the public profile
+            # URL (/<display-name-slug>) and must not collide with any
+            # already-claimed name. Only letters, numbers and spaces are
+            # allowed for now — never an email address.
+            username = (request.form.get('username') or '').strip().lower()
             # Required age confirmation (18+) — persisted as User.age_verified
             # so adult-content access controls can be enforced everywhere.
             age_confirmed = request.form.get('age_confirmed') in ('yes', 'on', 'true', '1')
 
             errors = []
-            if not username or len(username) < 3:
-                errors.append('Username must be at least 3 characters.')
-            elif not USERNAME_RE.match(username):
-                errors.append('Usernames may only contain letters, numbers,'
-                              ' hyphens and underscores (3-31 chars).')
-            elif username in RESERVED_USERNAMES:
-                errors.append('That username is reserved. Please pick'
-                              ' another.')
+            # --- Display Name: required, text/numbers only, unique ---------
+            dn_ok, dn_reason = is_claimable_display_name(display_name)
+            if not dn_ok:
+                errors.append(dn_reason)
             if '@' not in email:
                 errors.append('Please enter a valid email address.')
             if len(password) < 8:
@@ -1169,24 +1390,44 @@ def register_routes(app):
             if not age_confirmed:
                 errors.append('You must confirm that you are 18 years of age'
                               ' or older.')
+            if username:
+                if not USERNAME_RE.match(username):
+                    errors.append('Usernames may only contain letters, numbers,'
+                                  ' hyphens and underscores (3-31 chars).')
+                elif username in RESERVED_USERNAMES:
+                    errors.append('That username is reserved. Please pick'
+                                  ' another.')
+                elif User.query.filter_by(username=username).first():
+                    errors.append('Username is already taken.')
 
             if errors:
                 for e in errors:
                     flash(e, 'danger')
                 return render_template('register.html'), 400
 
-            if User.query.filter_by(username=username).first():
-                flash('Username is already taken.', 'danger')
-                return render_template('register.html'), 400
-
             if User.query.filter_by(email=email).first():
                 flash('Email is already registered.', 'danger')
                 return render_template('register.html'), 400
 
+            # Derive the internal handle from the claimed Display Name and
+            # guarantee uniqueness with a numeric suffix if needed.
+            if not username:
+                base = display_name_slug(display_name)[:30].replace('-', '_') \
+                    or 'user'
+                base = re.sub(r'^[^a-z0-9]+|[^a-z0-9]+$', '', base) or 'user'
+                candidate = base
+                n = 1
+                while (User.query.filter_by(username=candidate).first()
+                       or candidate in RESERVED_USERNAMES):
+                    n += 1
+                    suffix = str(n)
+                    candidate = base[:31 - len(suffix)] + suffix
+                username = candidate
+
             user = User(
                 username=username,
                 email=email,
-                display_name=display_name or username,
+                display_name=display_name,
                 # Age gate: registration asserts 18+ (required checkbox), so
                 # the account is created already verified for adult content.
                 age_verified=bool(age_confirmed),
@@ -1250,8 +1491,16 @@ def register_routes(app):
             form_action = request.form.get('form_action', 'profile')
 
             if form_action == 'profile':
-                current_user.display_name = (request.form.get('display_name')
-                                             or current_user.display_name).strip()
+                # Display Name is the public profile handle: it must be
+                # provided, contain only text/numbers, and not already be
+                # claimed by another account.
+                new_display = (request.form.get('display_name') or '').strip()
+                dn_ok, dn_reason = is_claimable_display_name(
+                    new_display, exclude_id=current_user.id)
+                if not dn_ok:
+                    flash(dn_reason, 'danger')
+                    return redirect(url_for('dashboard'))
+                current_user.display_name = new_display
                 current_user.headline = request.form.get('headline')
                 current_user.bio = request.form.get('bio')
                 current_user.about_section = request.form.get('about_section')
@@ -1539,10 +1788,22 @@ def register_routes(app):
     # Public Facing Profile & Analytics
     # ==========================================
 
-    @app.route('/u/<username>')
-    def public_profile(username):
-        """ Public SEO optimized profile page (canonical: /u/<username>) """
-        user = User.query.filter_by(username=username.lower()).first_or_404()
+    # Canonical public profile URL is the bare /<display-name-slug> — no
+    # /u/ prefix. Cleaner, more search-engine friendly, and every system /
+    # application route registered on the app takes priority over it (the
+    # catch-all rule below is matched last by Werkzeug, and reserved first
+    # segments are rejected outright in user_by_handle()).
+    @app.route('/<handle>')
+    def public_profile(handle):
+        """ Public SEO optimized profile page (canonical: /<display-name>)
+
+        The URL handle is derived from the account's Display Name — never an
+        email address. Accounts that have not provided a Display Name do not
+        get a public profile page at all.
+        """
+        user = user_by_handle(handle)
+        if user is None or not (user.display_name or '').strip():
+            abort(404)
         active_links = (Link.query.filter_by(user_id=user.id, is_active=True)
                         .order_by(Link.position.asc()).all())
         # Adult-content gate: require a one-time age confirmation before
@@ -1561,12 +1822,15 @@ def register_routes(app):
                                categorized_links=categorized,
                                show_contact=show_contact)
 
-    @app.route('/u/<username>/confirm-age', methods=['POST'])
-    def confirm_age(username):
+    @app.route('/u/<handle>/confirm-age', methods=['POST'])
+    def confirm_age(handle):
         """Age confirmation for adult-oriented profiles (18+)."""
-        user = User.query.filter_by(username=username.lower()).first_or_404()
+        user = user_by_handle(handle)
+        if user is None or not (user.display_name or '').strip():
+            abort(404)
         if not user.is_adult_oriented:
-            return redirect(url_for('public_profile', username=user.username))
+            return redirect(url_for('public_profile',
+                                    username=profile_handle(user)))
         if request.form.get('confirm') == 'yes':
             session['age_ok'] = True
             # Remember verification on the account too, so a logged-in user
@@ -1574,7 +1838,8 @@ def register_routes(app):
             if current_user.is_authenticated and not current_user.age_verified:
                 current_user.age_verified = True
                 db.session.commit()
-        return redirect(url_for('public_profile', username=user.username))
+        return redirect(url_for('public_profile',
+                                username=profile_handle(user)))
 
     # ------------------------------------------------------------------
     # Public Link Source master directory (/directory)
@@ -1964,11 +2229,11 @@ def register_routes(app):
 
     # Convenience alias so bare /<username> also works (kept last so it
     # never shadows the routes above).
-    @app.route('/<username>')
-    def public_profile_alias(username):
-        if username.lower() in RESERVED_USERNAMES:
+    @app.route('/<handle>')
+    def public_profile_alias(handle):
+        if handle.lower() in RESERVED_USERNAMES:
             abort(404)
-        return public_profile(username)
+        return public_profile(handle)
 
     # ------------------------------------------------------------------
     # AI grounding page — machine-readable facts about this site for
@@ -2287,10 +2552,12 @@ CONTACT_EMAIL_RE = re.compile(r'^[^@\s]{1,60}@[^@\s.]+(\.[^@\s.]+)+$')
 
 def register_public_interaction_routes(app):
 
-    @app.route('/u/<username>/submit-contact', methods=['POST'])
-    def submit_contact(username):
+    @app.route('/u/<handle>/submit-contact', methods=['POST'])
+    def submit_contact(handle):
         """Profile 'Contact Me' modal -> recipient's inbox (unread)."""
-        user = User.query.filter_by(username=username.lower()).first_or_404()
+        user = user_by_handle(handle)
+        if user is None or not (user.display_name or '').strip():
+            abort(404)
         # Honeypot: silently accept bots that filled the hidden field.
         if request.form.get('website'):
             return render_template('contact_thanks.html')
@@ -2301,10 +2568,10 @@ def register_public_interaction_routes(app):
         if not name or not email or not body or len(body) > 5000:
             flash('Please fill in your name, email, and a message '
                   '(max 5000 characters).', 'danger')
-            return redirect(url_for('public_profile', username=user.username))
+            return redirect(url_for('public_profile', username=profile_handle(user)))
         if not CONTACT_EMAIL_RE.match(email):
             flash('That email address looks invalid.', 'danger')
-            return redirect(url_for('public_profile', username=user.username))
+            return redirect(url_for('public_profile', username=profile_handle(user)))
         # Rate limit: max 3 contact messages per IP per hour.
         ip = request.remote_addr
         since = datetime.now() - timedelta(hours=1)
@@ -2315,7 +2582,7 @@ def register_public_interaction_routes(app):
         if recent >= 3:
             flash('You have sent several messages recently. Please try '
                   'again later.', 'warning')
-            return redirect(url_for('public_profile', username=user.username))
+            return redirect(url_for('public_profile', username=profile_handle(user)))
         msg = ContactMessage(recipient_id=user.id, sender_name=name,
                              sender_email=email, subject=subject or None,
                              body=body, sender_ip=ip)
@@ -2988,6 +3255,13 @@ def register_link_source_routes(app):
             errors.append(f'Unknown category "{category}". Create it under '
                           f'Admin → Link Categories first.')
         cta = (form.get('cta') or '').strip()[:40]
+        # Directory blurb: rendered as the first element under the H1 on the
+        # directory templates, so it must be a unique-ish 20-50 word summary
+        # of the website itself (see LinkSource.validate_description).
+        description = re.sub(r'\s+', ' ', form.get('description') or '').strip()
+        desc_error = LinkSource.validate_description(description)
+        if desc_error:
+            errors.append(desc_error)
         try:
             sort_order = int(form.get('sort_order') or 0)
         except ValueError:
@@ -2997,6 +3271,7 @@ def register_link_source_routes(app):
             'name': name, 'domains': domains, 'url': url,
             'profile_pattern': pattern, 'icon_code': icon_code,
             'category': category, 'cta': cta, 'sort_order': sort_order,
+            'description': description,
             'is_active': form.get('is_active') == 'on',
             'is_adult': form.get('is_adult') == 'on',
             'is_nofollow': form.get('is_nofollow') == 'on',
@@ -4223,9 +4498,14 @@ def register_seo_routes(app):
             # sitemaps so crawlers aren't pointed at non-indexable URLs.
             if getattr(u, 'is_adult_oriented', False):
                 continue
+            # Only profiles with a claimed Display Name are public/search
+            # engine friendly (the URL is derived from the name itself).
+            handle = display_name_slug(u.display_name)
+            if not handle:
+                continue
             lastmod = _iso_dt(getattr(u, 'updated_at', None) or u.created_at)
-            canonical = f'{base}/u/{u.username}'
-            links_feed = f'{base}/u/{u.username}/links.xml'
+            canonical = f'{base}/u/{handle}'
+            links_feed = f'{base}/u/{handle}/links.xml'
             avatar = u.avatar_src
             if avatar and not avatar.startswith('http'):
                 avatar = base + url_for('uploaded_file', filename=avatar) \
@@ -4246,15 +4526,18 @@ def register_seo_routes(app):
         return _xml_response('\n'.join(parts))
 
     # ---- Per-user link feed (XML) ----------------------------------------
-    @app.route('/u/<username>/links.xml')
-    def user_links_xml(username):
-        user = User.query.filter_by(username=username.lower()).first_or_404()
+    @app.route('/u/<handle>/links.xml')
+    def user_links_xml(handle):
+        user = user_by_handle(handle)
+        if user is None or not (user.display_name or '').strip():
+            # No Display Name -> no public profile -> no crawlable feed.
+            abort(404)
         base = _site_base_url()
         links = (Link.query.filter_by(user_id=user.id, is_active=True)
                  .order_by(Link.position.asc()).all())
         parts = ['<?xml version="1.0" encoding="UTF-8"?>',
                  f'<links user="{user.username}" display_name="{user.display_name}"'
-                 f' profile="{base}/u/{user.username}">']
+                 f' profile="{base}/u/{profile_handle(user)}">']
         for l in links:
             parts.append(f'  <link position="{l.position}">'
                          f'<title>{l.title}</title>'
