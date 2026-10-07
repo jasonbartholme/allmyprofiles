@@ -32,7 +32,8 @@ from models import (db, User, Link, Setting, Activity, Message, MessageRead,
                     REPORT_REASONS, REPORT_STATUSES, CONTACT_STATUSES,
                     LINK_CATEGORIES, MESSAGE_CATEGORIES, MESSAGE_SEVERITIES,
                     PAID_TIERS, HEX_COLOR_RE)
-from uploads_util import save_upload_image, delete_upload_image
+from uploads_util import (BACKGROUND_MAX_IMAGE_DIMENSION, save_upload_image,
+                          delete_upload_image)
 import catalogue_io
 import stripe_billing
 
@@ -159,7 +160,10 @@ def parse_video_url(raw):
 
 def video_embed(user):
     """Return a privacy-enhanced embed iframe URL for a user's intro
-    video, or None. Only ever built from validated ids/platforms."""
+    video, or None. Intro videos are a paid-tier feature and are only ever
+    built from validated ids/platforms."""
+    if user.tier not in PAID_TIERS:
+        return None
     if not user.video_platform or not user.video_id:
         return None
     if user.video_platform == 'youtube' and YOUTUBE_ID_RE.match(user.video_id):
@@ -204,7 +208,11 @@ def theme_for_user(user):
     return {
         'bg_color': t['bg_color'],
         'text_color': t['text_color'],
-        'bg_image_url': t.get('bg_image_url'),
+        'bg_image_url': (
+            user.background_src
+            if user.tier in PAID_TIERS and user.background_path
+            else t.get('bg_image_url')
+        ),
     }
 
 
@@ -851,6 +859,27 @@ def apply_country_fields(user, location):
     return user
 
 
+def apply_selected_country(user, country_code):
+    """Set a user's country from a canonical ISO alpha-2 selection.
+
+    ``location`` retains the country label for compatibility with existing
+    data consumers while new profile edits always use the canonical fields.
+    """
+    code = (country_code or '').strip().upper()
+    if not code:
+        user.location = None
+        user.country_code = None
+        user.country_name = None
+        return True
+    country = _ISO3166.get(code)
+    if country is None:
+        return False
+    user.country_code = code
+    user.country_name = country[0]
+    user.location = country[0]
+    return True
+
+
 def flag_emoji(iso2):
     """Regional-indicator emoji for a real ISO alpha-2 code, else None.
 
@@ -863,6 +892,15 @@ def flag_emoji(iso2):
     if code not in _ISO3166:
         return None
     return ''.join(chr(0x1F1E6 + ord(ch) - ord('A')) for ch in code)
+
+
+def country_choices():
+    """Countries available in the profile country selector."""
+    return [
+        {'code': code, 'name': name, 'flag': flag_emoji(code)}
+        for code, (name, _) in sorted(
+            _ISO3166.items(), key=lambda item: item[1][0].casefold())
+    ]
 
 
 def country_slug(code):
@@ -1217,20 +1255,25 @@ def register_routes(app):
                 current_user.headline = request.form.get('headline')
                 current_user.bio = request.form.get('bio')
                 current_user.about_section = request.form.get('about_section')
-                # Location + derived country bucket (powers /countries for
-                # users who also check the searchable box).
-                apply_country_fields(
-                    current_user,
-                    (request.form.get('location') or '').strip()[:120] or None)
+                if not apply_selected_country(
+                        current_user, request.form.get('country_code')):
+                    flash('Please choose a valid country.', 'warning')
                 # Skills: normalized list, stored back as a clean CSV string.
                 skills = normalize_skills(request.form.get('skills'))
                 current_user.skills = ', '.join(skills) or None
                 # Adult-content flag (checkbox posts 'on' when ticked).
                 current_user.is_adult_oriented = bool(
                     request.form.get('is_adult_oriented'))
-                # Intro video: accept full URL or bare ID; store validated id.
+                # Intro video is limited to paid tiers. Accept a full URL or
+                # bare ID only after enforcing the tier restriction.
                 video_raw = (request.form.get('intro_video') or '').strip()
-                if video_raw:
+                if current_user.tier not in PAID_TIERS:
+                    if video_raw or current_user.video_platform:
+                        flash('Intro videos are available on paid tiers.',
+                              'warning')
+                    current_user.video_platform = None
+                    current_user.video_id = None
+                elif video_raw:
                     parsed = parse_video_url(video_raw)
                     if parsed:
                         current_user.video_platform, current_user.video_id = parsed
@@ -1300,6 +1343,40 @@ def register_routes(app):
                 flash('Uploaded avatar removed.', 'info')
                 return redirect(url_for('dashboard'))
 
+            elif form_action == 'background-upload':
+                if current_user.tier not in PAID_TIERS:
+                    flash('Custom backgrounds are available on paid tiers.',
+                          'warning')
+                    return redirect(url_for('dashboard'))
+                upload = request.files.get('background_file')
+                max_kb = Setting.get_int('max_upload_size_kb', 2048)
+                try:
+                    rel_path = save_upload_image(
+                        upload, app.config, subdir='backgrounds',
+                        max_kb=max_kb,
+                        max_dimension=BACKGROUND_MAX_IMAGE_DIMENSION)
+                except ValueError as e:
+                    flash(str(e), 'danger')
+                    return redirect(url_for('dashboard'))
+                old = current_user.background_path
+                current_user.background_path = rel_path
+                db.session.commit()
+                if old:
+                    delete_upload_image(old, app.config)
+                flash('Profile background updated!', 'success')
+                return redirect(url_for('dashboard'))
+
+            elif form_action == 'background-remove':
+                if current_user.tier not in PAID_TIERS:
+                    flash('Custom backgrounds are available on paid tiers.',
+                          'warning')
+                    return redirect(url_for('dashboard'))
+                delete_upload_image(current_user.background_path, app.config)
+                current_user.background_path = None
+                db.session.commit()
+                flash('Profile background removed.', 'info')
+                return redirect(url_for('dashboard'))
+
             elif form_action == 'link-order':
                 # Persist drag-and-drop ordering: ordered list of link ids
                 order_json = request.form.get('order', '')
@@ -1352,6 +1429,8 @@ def register_routes(app):
         return render_template('dashboard.html', links=user_links,
                                total_clicks=total_clicks,
                                max_upload_kb=Setting.get_int('max_upload_size_kb', 2048),
+                               paid_tiers=PAID_TIERS,
+                               country_choices=country_choices(),
                                link_sources=LinkSource.active(),
                                link_categories=LinkCategory.names(),
                                themes=PROFILE_THEMES,
@@ -1754,8 +1833,9 @@ def register_routes(app):
     #      ``User.is_featured`` account) occupy the "featured" slots at the
     #      top — at most Setting('directory_featured_max', default 5) of
     #      them, chosen at random on every request.
-    #   2. Everyone else is listed alphabetically by display name, paginated
-    #      with the admin-configurable Setting('directory_page_size').
+    #   2. Everyone else can be filtered by display name or skills and sorted
+    #      by display name, then paginated with the admin-configurable
+    #      Setting('directory_page_size').
     # Card contents (name, avatar thumbnail, external network-profile link,
     # and an "AMP Profile" link to the local site profile) are rendered by
     # templates/directory_source.html from the dicts built below.
@@ -1828,17 +1908,32 @@ def register_routes(app):
         member_ids = _directory_member_ids(include_adult)
         rows = _directory_profile_rows(src, member_ids)
 
+        query = (request.args.get('q') or '').strip()[:100]
+        query_key = query.casefold()
+        if query_key:
+            rows = [
+                row for row in rows
+                if query_key in (row['user'].display_name or '').casefold()
+                or query_key in (row['user'].skills or '').casefold()
+            ]
+
         # 1) Featured: paying accounts (+ admin-pinned ones), max N at random.
         pool = [r for r in rows if r['paid'] or r['featured']]
         random.shuffle(pool)
         featured = pool[:featured_max]
         featured_ids = {r['user'].id for r in featured}
 
-        # 2) The rest alphabetically by display name (username breaks ties).
-        rest = sorted((r for r in rows if r['user'].id not in featured_ids),
-                      key=lambda r: ((r['user'].display_name or
-                                       r['user'].username).casefold(),
-                                      r['user'].username))
+        sort = request.args.get('sort', 'name_asc')
+        if sort not in {'name_asc', 'name_desc'}:
+            sort = 'name_asc'
+
+        # 2) The rest sorted by display name (username breaks ties).
+        rest = sorted(
+            (r for r in rows if r['user'].id not in featured_ids),
+            key=lambda r: ((r['user'].display_name or
+                            r['user'].username).casefold(),
+                           r['user'].username),
+            reverse=sort == 'name_desc')
 
         total_pages = max(1, -(-len(rest) // per_page))
         try:
@@ -1862,8 +1957,9 @@ def register_routes(app):
             total_members=len(rows),
             total_rest=len(rest),
             per_page=per_page,
+            query=query,
+            sort=sort,
             include_adult=include_adult,
-            page_args={'page': page} if page != 1 else {},
         )
 
     # Convenience alias so bare /<username> also works (kept last so it

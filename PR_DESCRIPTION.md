@@ -38,8 +38,8 @@ Implements five linked stories building the public Link Source directory, its pr
 Dev databases are upgraded automatically via the `_ensure_schema()` helper (`ALTER TABLE ... ADD COLUMN`). A production Alembic migration should be generated before deploy (`flask db migrate -m "directory feature bundle"`).
 
 ## Testing
-- `test_directory_smoke.py` — covers all ACs across the five stories: guest vs. unverified vs. verified adult visibility, opt-in/opt-out directory behavior, personal-website exclusion, alphabetical brand-color cards, featured paying slots, pagination config, sidebar sections.
-- `app.py` / `models.py` pass syntax checks; existing smoke tests (`test_homepage_smoke.py`, `test_messaging_smoke.py`, `test_catalogue_import_smoke.py`) unaffected.
+- `tests/test_directory_smoke.py` — covers all ACs across the five stories: guest vs. unverified vs. verified adult visibility, opt-in/opt-out directory behavior, personal-website exclusion, alphabetical brand-color cards, featured paying slots, pagination config, sidebar sections.
+- `app.py` / `models.py` pass syntax checks; existing smoke tests (`tests/test_homepage_smoke.py`, `tests/test_messaging_smoke.py`, `tests/test_catalogue_import_smoke.py`) unaffected.
 
 ## Housekeeping
 - Untracked `__pycache__/` and `instance/*.db` artifacts (they were previously committed); `.gitignore` updated accordingly.

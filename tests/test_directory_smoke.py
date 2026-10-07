@@ -10,7 +10,11 @@ Plus the directory-visibility rules from the previous story: opted-out users
 are excluded everywhere, personal websites never appear.
 """
 import os
+import sys
 import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 os.environ['FLASK_ENV'] = 'testing'
 _tmpdb = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
@@ -46,12 +50,10 @@ with app.app_context():
     check('seeded GitHub/Steam/Personal Website sources',
           all([github, steam, personal]))
 
-    # An adult network, flagged directly on the source.
-    adult_src = LinkSource(name='AdultWorld', domains='adultworld.com',
-                           bg_color='#6f1d1d', text_color='#ffffff',
-                           border_color='#4c1414', icon_code='shield-lock',
-                           category='Other', sort_order=99, is_adult=True)
-    db.session.add(adult_src)
+    # Reuse the seeded adult network so this test remains compatible with
+    # the catalogue defaults.
+    adult_src = LinkSource.query.filter_by(name='AdultWorld').first()
+    adult_src.is_adult = True
 
     # A source that is adult via its *category* flag (previous story field).
     cat = LinkCategory.query.filter_by(name='Other').first()
@@ -106,11 +108,17 @@ check('H1 Social Networks', '<h1 class="display-5 fw-bold mb-3">Social Networks<
 check('descriptive leading paragraph', 'Every platform you can connect on AllMyProfiles' in body)
 
 print('\n== AC 3: alphabetical brand-color cards ==')
-names = [s.name for s in LinkSource.query.filter_by(is_deleted=False, is_active=True).all()]
+with app.app_context():
+    names = [s.name for s in LinkSource.query.filter_by(
+        is_deleted=False, is_active=True).all()]
+    gh_bg = LinkSource.query.filter_by(name='GitHub').first().bg_color
+    adult_name = db.session.get(LinkSource, adult_id).name
+    personal_name = 'Personal Website'
+    github_name = 'GitHub'
+    adult_source_name = adult_name
 pos = [body.find(f'title="{n} profiles"') for n in ('Bandcamp', 'Discord', 'GitHub')]
 check('cards present for Bandcamp/Discord/GitHub', all(p >= 0 for p in pos))
 check('cards ordered alphabetically', pos == sorted(pos))
-gh_bg = LinkSource.query.filter_by(name='GitHub').first().bg_color
 check('brand color used on card background', f'background-color: {gh_bg}' in body)
 check('personal website not listed as a card',
       'title="Personal Website profiles"' not in body)
@@ -119,14 +127,14 @@ check('opted-out member excluded from counts (Steam shows 0)',
 
 print('\n== AC 4: adult gating ==')
 check('guest: adult source card hidden',
-      f'title="{LinkSource.query.get(adult_id).name} profiles"' not in body)
+      f'title="{adult_name} profiles"' not in body)
 check('guest: 18+ notice shown', '18+ networks are hidden for guests' in body)
 
 login('h@x.io')  # logged in, NOT age-verified
 r = client.get('/directory')
 body2 = r.get_data(as_text=True)
 check('logged-in unverified: adult card still hidden',
-      f'title="{LinkSource.query.get(adult_id).name} profiles"' not in body2)
+      f'title="{adult_name} profiles"' not in body2)
 check('logged-in unverified: unlock button offered',
       'I am 18+' in body2)
 
@@ -135,7 +143,7 @@ client.post('/directory/age-gate', data={'confirm': 'yes'},
 r = client.get('/directory')
 body3 = r.get_data(as_text=True)
 check('verified 18+: adult card visible',
-      f'title="{LinkSource.query.get(adult_id).name} profiles"' in body3)
+      f'title="{adult_name} profiles"' in body3)
 check('verified 18+: adult card badged', '>18+</span>' in body3)
 
 print('\n== visibility preference respected ==')
@@ -146,14 +154,14 @@ check('GitHub card counts the opted-in member',
       f'title="GitHub profiles"' in body3 and '1 profile' in body3)
 check('opted-out user\'s Steam link yields 0 profiles',
       'title="Steam profiles"' in body3 and '>\n              0\n' in body3.replace('\r', ''))
-r = client.get(f'/directory/{source_slug(gh.name)}')
+r = client.get(f'/directory/{source_slug(github_name)}')
 sb = r.get_data(as_text=True)
 check('/directory/github lists the opted-in member',
       r.status_code == 200 and 'visibleuser' in sb)
 check('/directory/github excludes opted-out member', 'hiddenuser' not in sb)
-r = client.get(f'/directory/{source_slug(personal.name)}')
+r = client.get(f'/directory/{source_slug(personal_name)}')
 check('personal website detail page 404s', r.status_code == 404)
-r = client.get(f'/directory/{source_slug(aw.name)}')
+r = client.get(f'/directory/{source_slug(adult_source_name)}')
 check('adult detail page visible once verified', r.status_code == 200)
 check('adult detail page lists its member', 'adultmember' in r.get_data(as_text=True))
 

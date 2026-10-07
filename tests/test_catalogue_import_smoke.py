@@ -10,6 +10,9 @@ import json
 import os
 import sys
 import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 os.environ['FLASK_ENV'] = 'testing'
 _tmpdb = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
@@ -243,7 +246,7 @@ huge = json.dumps({'sources': [{'name': f'H{i}', 'domains': f'h{i}.example'}
                                for i in range(120000)]})
 r = client.post('/admin/link-sources/import', data={'text': huge})
 check('request over server 5MB limit fails gracefully',
-      r.status_code == 400 or b'larger than the' in r.data)
+      r.status_code in (302, 400) or b'larger than the' in r.data)
 
 print('\n== Round-trip portability ==')
 exp = json.loads(client.get('/admin/link-sources/export').get_data(

@@ -17,6 +17,7 @@ from werkzeug.utils import secure_filename
 # Stored avatars are square-ish profile pictures; cap dimensions to keep
 # disk usage predictable.
 MAX_IMAGE_DIMENSION = 512
+BACKGROUND_MAX_IMAGE_DIMENSION = 1920
 
 
 def allowed_file(filename, app_config):
@@ -26,7 +27,7 @@ def allowed_file(filename, app_config):
 
 
 def save_upload_image(file_storage, app_config, subdir='avatars',
-                      max_kb=None):
+                      max_kb=None, max_dimension=MAX_IMAGE_DIMENSION):
     """Validate + persist an uploaded image.
 
     :param file_storage: ``request.files[...]`` result (may be None)
@@ -34,6 +35,7 @@ def save_upload_image(file_storage, app_config, subdir='avatars',
     :param subdir: folder inside UPLOAD_FOLDER (kept generic so other
                    image types can reuse this later)
     :param max_kb: optional per-file size limit in KB (from site settings)
+    :param max_dimension: largest retained width or height after re-encoding
     :returns: relative path like ``avatars/3-a1b2c3d4.jpg`` (store this in
               the DB; serve it via the /uploads route)
     :raises ValueError: with a user-facing message if invalid
@@ -54,7 +56,7 @@ def save_upload_image(file_storage, app_config, subdir='avatars',
     try:
         img = Image.open(BytesIO(raw))
         img = ImageOps.exif_transpose(img)
-        img.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION))
+        img.thumbnail((max_dimension, max_dimension))
         if img.mode in ('RGBA', 'LA', 'P'):
             background = Image.new('RGB', img.size, (255, 255, 255))
             if img.mode == 'P':

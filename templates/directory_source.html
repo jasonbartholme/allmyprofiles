@@ -5,7 +5,7 @@
 {% block description %}Browse {{ total_members }} public {{ source.name }} profiles from the {{ site_name }} community — visit a member's network profile or their AMP link-in-bio page.{% endblock %}
 
 {% macro member_card(m, featured=false) %}
-<div class="col-12 col-md-6 col-lg-4">
+<div class="col-12 col-md-6 col-lg-3">
   <div class="card link-card h-100{% if featured %} border-warning{% endif %}">
     <div class="card-body d-flex align-items-center gap-3">
       <img src="{{ m.user.avatar_src }}" alt="{{ m.user.display_name }} avatar"
@@ -18,6 +18,8 @@
         <div class="small text-muted text-truncate">@{{ m.user.username }}
           {% set handle = m.link.network_handle %}
           {% if handle and handle|lower != m.user.username|lower %}· {{ handle }}{% endif %}
+          {% set country_flag = flag_emoji(m.user.country_code) %}
+          {% if country_flag %}<span class="ms-1" title="{{ m.user.country_name }}" aria-label="{{ m.user.country_name }}">{{ country_flag }}</span>{% endif %}
         </div>
         {% if m.user.headline %}
         <div class="small text-truncate">{{ m.user.headline }}</div>
@@ -33,7 +35,7 @@
       {# Internal link -> the member's local site (AMP) profile page #}
       <a class="btn btn-sm btn-outline-secondary rounded-pill px-3"
          href="{{ url_for('public_profile', username=m.user.username) }}">
-        AMP Profile
+        Profile <i class="bi bi-box-arrow-down-left ms-1"></i>
       </a>
     </div>
   </div>
@@ -84,31 +86,70 @@
   </section>
   {% endif %}
 
-  {% if members or total_rest %}
+  {% if total_members or query %}
   <section aria-label="All {{ source.name }} profiles">
-    <div class="d-flex align-items-baseline justify-content-between mb-3">
+    <div class="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-3">
       <h2 class="h5 fw-bold mb-0">
         {% if featured %}All other {{ source.name }} profiles{% else %}{{ source.name }} profiles{% endif %}
       </h2>
-      <span class="small text-muted">A – Z · page {{ page }} of {{ total_pages }}</span>
     </div>
+    <form method="GET" class="row g-2 align-items-end mb-4" role="search">
+      <div class="col-12 col-md">
+        <label class="form-label small fw-semibold mb-1" for="directory-search">
+          Search profiles or interests
+        </label>
+        <input type="search" class="form-control" id="directory-search" name="q"
+               value="{{ query }}" maxlength="100"
+               placeholder="Name or interest">
+      </div>
+      <div class="col-12 col-sm-6 col-md-auto">
+        <label class="form-label small fw-semibold mb-1" for="directory-sort">Sort</label>
+        <select class="form-select" id="directory-sort" name="sort">
+          <option value="name_asc" {{ 'selected' if sort == 'name_asc' }}>Name: A–Z</option>
+          <option value="name_desc" {{ 'selected' if sort == 'name_desc' }}>Name: Z–A</option>
+        </select>
+      </div>
+      <div class="col-12 col-sm-auto">
+        <button class="btn btn-primary w-100" type="submit">Apply</button>
+      </div>
+      <div class="col-12">
+        <span class="small text-muted" aria-live="polite">
+          {{ total_members }} matching profile{{ '' if total_members == 1 else 's' }}
+          · page {{ page }} of {{ total_pages }}
+        </span>
+      </div>
+    </form>
+    {% if members %}
     <div class="row g-3">
       {% for m in members %}{{ member_card(m) }}{% endfor %}
     </div>
+    {% elif not featured %}
+    <p class="text-muted mb-0">No profiles match your search.</p>
+    {% endif %}
 
     {% if total_pages > 1 %}
     <nav class="mt-4" aria-label="Directory pages">
       <ul class="pagination pagination-sm justify-content-center">
         <li class="page-item{% if page <= 1 %} disabled{% endif %}">
-          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), page=page - 1) }}">&larr;</a>
+          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, page=page - 1) }}" aria-label="Previous page">&larr;</a>
         </li>
-        {% for p in range(1, total_pages + 1) %}
+        {% set start_page = [1, page - 2]|max %}
+        {% set end_page = [total_pages, page + 2]|min %}
+        {% if start_page > 1 %}
+        <li class="page-item"><a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, page=1) }}">1</a></li>
+        {% if start_page > 2 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+        {% endif %}
+        {% for p in range(start_page, end_page + 1) %}
         <li class="page-item{% if p == page %} active{% endif %}">
-          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), page=p) }}">{{ p }}</a>
+          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, page=p) }}">{{ p }}</a>
         </li>
         {% endfor %}
+        {% if end_page < total_pages %}
+        {% if end_page < total_pages - 1 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+        <li class="page-item"><a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, page=total_pages) }}">{{ total_pages }}</a></li>
+        {% endif %}
         <li class="page-item{% if page >= total_pages %} disabled{% endif %}">
-          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), page=page + 1) }}">&rarr;</a>
+          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, page=page + 1) }}" aria-label="Next page">&rarr;</a>
         </li>
       </ul>
     </nav>
@@ -116,7 +157,7 @@
   </section>
   {% endif %}
 
-  {% if not featured and not total_rest %}
+  {% if not featured and not total_rest and not query %}
   <div class="text-center py-5">
     <i class="bi bi-person-lines-fill fs-1 text-muted"></i>
     <h2 class="h4 mt-3">No public profiles yet</h2>

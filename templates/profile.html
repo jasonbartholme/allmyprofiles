@@ -24,7 +24,10 @@
     "alternateName": "{{ user.username }}",
     {% if user.headline %}"description": "{{ user.headline }}",{% endif %}
     {% if skills %}"knowsAbout": [{% for s in skills %}"{{ s }}"{% if not loop.last %}, {% endif %}{% endfor %}],{% endif %}
-    {% if user.location %}"address": {
+    {% if user.country_name %}"address": {
+      "@type": "PostalAddress",
+      "addressCountry": "{{ user.country_name }}"
+    },{% elif user.location %}"address": {
       "@type": "PostalAddress",
       "addressLocality": "{{ user.location }}"
     },{% endif %}
@@ -37,7 +40,17 @@
 }
 </script>
 <style>
-  body { background: linear-gradient(180deg, #1b1f3b 0%, #35306b 40%, #f7f8fc 40.1%, #f7f8fc 100%); }
+  body {
+    {% if profile.bg_image_url %}
+    background-color: #1b1f3b;
+    background-image: linear-gradient(rgba(27, 31, 59, .72), rgba(53, 48, 107, .72)), url('{{ profile.bg_image_url }}');
+    background-position: center;
+    background-size: cover;
+    background-attachment: fixed;
+    {% else %}
+    background: linear-gradient(180deg, #1b1f3b 0%, #35306b 40%, #f7f8fc 40.1%, #f7f8fc 100%);
+    {% endif %}
+  }
   .profile-card { max-width: 640px; margin: 0 auto; }
   .profile-link {
     display: flex; align-items: center; gap: .75rem;
@@ -77,8 +90,8 @@
          class="rounded-circle border border-4 border-white shadow mb-3" width="110" height="110">
     <h1 class="h3 fw-bold text-white">{{ user.display_name }}</h1>
     <p class="text-white-50 mb-1">@{{ user.username }}</p>
-    {% if user.location %}
-    <p class="text-white-50 small mb-1"><i class="bi bi-geo-alt me-1"></i>{{ user.location }}</p>
+    {% if user.country_name or user.location %}
+    <p class="text-white-50 small mb-1"><i class="bi bi-geo-alt me-1"></i>{{ user.country_name or user.location }}</p>
     {% endif %}
     {% if user.headline %}<p class="fw-semibold text-white">{{ user.headline }}</p>{% endif %}
     {% if user.bio %}<p class="text-white-50">{{ user.bio }}</p>{% endif %}

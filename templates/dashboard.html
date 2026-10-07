@@ -294,9 +294,62 @@
 
     <!-- ===== Profile editor ===== -->
     <div class="col-lg-5">
+      <div class="card p-4 mb-4">
+        <h5 class="fw-bold mb-3"><i class="bi bi-person-bounding-box me-2"></i>Avatar</h5>
+        <div class="d-flex align-items-center gap-3 mb-2">
+          <img src="{{ current_user.avatar_src }}" alt="" class="avatar-lg rounded-circle border">
+          <div class="flex-grow-1">
+            <form method="POST" action="{{ url_for('dashboard') }}" enctype="multipart/form-data" class="d-flex gap-2 align-items-center flex-wrap">
+              <input type="hidden" name="form_action" value="avatar-upload">
+              <input type="file" class="form-control form-control-sm" name="avatar_file"
+                     accept=".png,.jpg,.jpeg,.gif,.webp" style="max-width: 220px;">
+              <button type="submit" class="btn btn-sm btn-primary rounded-pill px-3">Upload</button>
+            </form>
+            {% if current_user.avatar_path %}
+            <form method="POST" action="{{ url_for('dashboard') }}" class="d-inline mt-1">
+              <input type="hidden" name="form_action" value="avatar-remove">
+              <button type="submit" class="btn btn-sm btn-link text-danger p-0 small">Remove uploaded avatar</button>
+            </form>
+            {% endif %}
+            <div class="form-text">PNG, JPG, GIF or WEBP · max {{ max_upload_kb }} KB · stored locally on this server.</div>
+          </div>
+        </div>
+        <div class="mb-0">
+          <label class="form-label" for="avatar_url">…or avatar URL (external)</label>
+          <div class="input-group">
+            <input type="url" class="form-control" id="avatar_url" name="avatar_url"
+                   value="{{ current_user.avatar_url or '' }}" placeholder="https://…/avatar.png"
+                   form="profile-form">
+          </div>
+          <div class="form-text">An uploaded avatar takes precedence over a URL.</div>
+        </div>
+      </div>
+
+      <div class="card p-4 mb-4">
+        <h5 class="fw-bold mb-3"><i class="bi bi-image me-2"></i>Profile background</h5>
+        {% if current_user.tier in paid_tiers %}
+        <form method="POST" action="{{ url_for('dashboard') }}" enctype="multipart/form-data"
+              class="d-flex gap-2 align-items-center flex-wrap">
+          <input type="hidden" name="form_action" value="background-upload">
+          <input type="file" class="form-control form-control-sm" name="background_file"
+                 accept=".png,.jpg,.jpeg,.gif,.webp" style="max-width: 220px;">
+          <button type="submit" class="btn btn-sm btn-primary rounded-pill px-3">Upload</button>
+        </form>
+        {% if current_user.background_path %}
+        <form method="POST" action="{{ url_for('dashboard') }}" class="d-inline mt-1">
+          <input type="hidden" name="form_action" value="background-remove">
+          <button type="submit" class="btn btn-sm btn-link text-danger p-0 small">Remove background</button>
+        </form>
+        {% endif %}
+        <div class="form-text">PNG, JPG, GIF or WEBP · max {{ max_upload_kb }} KB · shown on your public profile.</div>
+        {% else %}
+        <p class="text-muted mb-0">Custom profile backgrounds are available on paid plans.</p>
+        {% endif %}
+      </div>
+
       <div class="card p-4">
         <h5 class="fw-bold mb-3"><i class="bi bi-person-vcard me-2"></i>Edit your profile</h5>
-        <form method="POST" action="{{ url_for('dashboard') }}">
+        <form method="POST" action="{{ url_for('dashboard') }}" id="profile-form">
           <input type="hidden" name="form_action" value="profile">
           <div class="mb-3">
             <label class="form-label" for="display_name">Display name</label>
@@ -318,23 +371,27 @@
             <label class="form-label" for="about_section">About section</label>
             <textarea class="form-control" id="about_section" name="about_section" rows="4">{{ current_user.about_section or '' }}</textarea>
           </div>
-          <div class="row g-3 mb-3">
-            <div class="col-md-6">
-              <label class="form-label" for="location">Location</label>
-              <input type="text" class="form-control" id="location" name="location"
-                     value="{{ current_user.location or '' }}" maxlength="120"
-                     placeholder="e.g. San Francisco, CA">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label" for="skills">Skills</label>
-              <input type="text" class="form-control" id="skills" name="skills"
-                     value="{{ current_user.skills or '' }}" maxlength="300"
-                     placeholder="Python, Flask, UI/UX, Gaming">
-              <div class="form-text">Comma-separated · shown as badges on your profile (max 12).</div>
-            </div>
+          <div class="mb-3">
+            <label class="form-label" for="country_code">Country</label>
+            <select class="form-select" id="country_code" name="country_code">
+              <option value="">Select your country</option>
+              {% for country in country_choices %}
+              <option value="{{ country.code }}"
+                      {{ 'selected' if current_user.country_code == country.code }}>
+                {{ country.flag }} {{ country.name }}
+              </option>
+              {% endfor %}
+            </select>
           </div>
-          <div class="row g-3 mb-3">
-            <div class="col-md-6">
+          <div class="mb-3">
+            <label class="form-label" for="skills">Skills</label>
+            <input type="text" class="form-control" id="skills" name="skills"
+                   value="{{ current_user.skills or '' }}" maxlength="300"
+                   placeholder="Python, Flask, UI/UX, Gaming">
+            <div class="form-text">Comma-separated · shown as badges on your profile (max 12).</div>
+          </div>
+          <div class="mb-3">
+            {% if current_user.tier in paid_tiers %}
               <label class="form-label" for="intro_video">Intro video (YouTube or Vimeo)</label>
               <input type="text" class="form-control" id="intro_video" name="intro_video"
                      placeholder="https://youtube.com/watch?v=… or vimeo URL">
@@ -345,21 +402,23 @@
                        name="clear_video" value="1"> Remove video</label>
               </div>
               {% endif %}
+            {% else %}
+              <div class="form-text">Intro videos are available on paid plans.</div>
+            {% endif %}
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="ga4_id">Google Analytics 4 ID</label>
+            <input type="text" class="form-control font-monospace" id="ga4_id" name="ga4_id"
+                 value="{{ current_user.ga4_id or '' }}" maxlength="32"
+                 placeholder="G-ABC123XYZ9" autocomplete="off">
+            {% if current_user.ga4_id %}
+            <div class="form-text">
+              <label class="form-check-label"><input type="checkbox" class="form-check-input"
+                   name="clear_ga4" value="1"> Remove GA4 tag</label>
             </div>
-            <div class="col-md-6">
-              <label class="form-label" for="ga4_id">Google Analytics 4 ID</label>
-              <input type="text" class="form-control font-monospace" id="ga4_id" name="ga4_id"
-                     value="{{ current_user.ga4_id or '' }}" maxlength="32"
-                     placeholder="G-ABC123XYZ9" autocomplete="off">
-              {% if current_user.ga4_id %}
-              <div class="form-text">
-                <label class="form-check-label"><input type="checkbox" class="form-check-input"
-                       name="clear_ga4" value="1"> Remove GA4 tag</label>
-              </div>
-              {% else %}
-              <div class="form-text">Your profile page reports traffic to this property.</div>
-              {% endif %}
-            </div>
+            {% else %}
+            <div class="form-text">Your profile page reports traffic to this property.</div>
+            {% endif %}
           </div>
           <div class="form-check form-switch mb-4">
             <input class="form-check-input" type="checkbox" id="is_adult_oriented"
@@ -382,35 +441,6 @@
                 When off, none of your links are listed anywhere in it. Personal websites are
                 never included, regardless of this setting.</span>
             </label>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Avatar</label>
-            <div class="d-flex align-items-center gap-3 mb-2">
-              <img src="{{ current_user.avatar_src }}" alt="" class="avatar-lg rounded-circle border">
-              <div class="flex-grow-1">
-                <form method="POST" action="{{ url_for('dashboard') }}" enctype="multipart/form-data" class="d-flex gap-2 align-items-center flex-wrap">
-                  <input type="hidden" name="form_action" value="avatar-upload">
-                  <input type="file" class="form-control form-control-sm" name="avatar_file"
-                         accept=".png,.jpg,.jpeg,.gif,.webp" style="max-width: 220px;">
-                  <button type="submit" class="btn btn-sm btn-primary rounded-pill px-3">Upload</button>
-                </form>
-                {% if current_user.avatar_path %}
-                <form method="POST" action="{{ url_for('dashboard') }}" class="d-inline mt-1">
-                  <input type="hidden" name="form_action" value="avatar-remove">
-                  <button type="submit" class="btn btn-sm btn-link text-danger p-0 small">Remove uploaded avatar</button>
-                </form>
-                {% endif %}
-                <div class="form-text">PNG, JPG, GIF or WEBP · max {{ max_upload_kb }} KB · stored locally on this server.</div>
-              </div>
-            </div>
-          </div>
-          <div class="mb-4">
-            <label class="form-label" for="avatar_url">…or avatar URL (external)</label>
-            <div class="input-group">
-              <input type="url" class="form-control" id="avatar_url" name="avatar_url"
-                     value="{{ current_user.avatar_url or '' }}" placeholder="https://…/avatar.png">
-            </div>
-            <div class="form-text">An uploaded avatar takes precedence over a URL.</div>
           </div>
           <button type="submit" class="btn btn-primary rounded-pill px-4">Save profile</button>
         </form>

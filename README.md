@@ -14,7 +14,7 @@ audit log, impersonation, site settings).
 
 - **Flask 3** application factory (`app.py` → `create_app()`)
 - **Flask-SQLAlchemy** + **Flask-Migrate** (schema migrations)
-- **Flask-Login** (sessions), **Pillow** (avatar upload processing),
+- **Flask-Login** (sessions), **Pillow** (profile-image upload processing),
   **requests** (broken-link checker)
 - **Bootstrap 5** + Bootstrap Icons + SortableJS (CDN; no build step)
 - **watchdog** pinned `>=4.0,<6.1` in `requirements.txt` — Werkzeug's
@@ -40,8 +40,8 @@ uploads_util.py         # image validation / re-encoding / storage helpers
 create_admin.py         # CLI: create or promote a site-admin account
 check_links.py          # cron script: broken-link checker + inbox notifs
 templates/              # Jinja2 templates (incl. templates/admin/*)
-test_homepage_smoke.py  # e2e smoke test: landing page & public routes
-test_messaging_smoke.py # e2e smoke test: messaging / inbox / link-check
+tests/                  # standalone smoke tests for public routes, billing,
+                        # directory, country, uploads, messaging and catalogue flows
 uploads/                # ⚠ user-uploaded images — git-ignored, back this up!
 instance/, *.db         # dev SQLite database — git-ignored
 ```
@@ -105,6 +105,11 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
   under `uploads/avatars/` (images are validated, EXIF-stripped, resized to
   ≤512 px and re-encoded as JPEG). An external avatar URL still works as a
   fallback; uploads take precedence.
+- **Custom profile backgrounds** — paid tiers can upload PNG/JPG/GIF/WEBP
+  backgrounds (subject to the admin upload-size limit). Images are
+  validated, metadata-stripped, resized to ≤1920 px, and stored locally under
+  `uploads/backgrounds/`; they are hidden on public profiles when an account
+  is on the Free tier.
 - Links manager: add / hide / delete, drag-and-drop ordering, click counts
 - **Graphical "Add a new link" picker** — instead of a plain text dropdown,
   every network from the admin catalogue appears as one row with its icon
@@ -138,9 +143,19 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
   `submit-contact`), each with its own thread view and archive/delete actions.
   Unread messages show a live badge count in the navbar and on the dashboard;
   opening a message marks it read, and messages can be archived / unarchived.
-- Profile extras: skills list, featured video embed (YouTube/Vimeo URLs are
+- Profile extras: skills list, paid-tier video embed (YouTube/Vimeo URLs are
   parsed into safe embeds), curated theme picker (higher tiers unlock more
   themes).
+- **Country selector** — profiles use a canonical country list, render the
+  country label publicly, and show the matching flag on directory-source
+  cards.
+- **Profile discovery** — `/directory` indexes opted-in network profiles;
+  each `/directory/<source>` listing supports display-name/interest search,
+  A–Z or Z–A sorting, matching-record counts, and query-preserving
+  pagination. Source results use responsive four-column desktop cards.
+- **Country discovery** — `/countries` and `/country/<country>` list
+  eligible opted-in profiles by canonical country, with country flags,
+  featured members, and configurable pagination.
 
 ## Link source catalogue (networks & categories)
 
@@ -206,8 +221,8 @@ served by the `home()` route):
    optimization** (the key differentiator), and built-in click analytics.
 4. **Pricing matrix** — four tiers (Free / Expanded $5 / Full $12 / Custom
    $29 per month) with a monthly↔annual toggle showing discounted annual
-   rates ($4/$10/$24 per month billed yearly). *Prices are display-only
-   placeholders until billing is integrated.*
+   rates ($4/$10/$24 per month billed yearly). The marketing amounts are
+   illustrative; configured Stripe Price IDs govern checkout.
 5. **Live sandbox** — type a title + URL and watch the link stack render in
    real time inside the phone frame.
 6. **FAQ accordion** — custom domains, tracking pixels, link limits, SEO.
@@ -286,8 +301,9 @@ Site admins (`is_admin` flag) get a SaaS-style dashboard:
   delivered & read stats per message, recall broadcasts (see section above)
 - **Site settings** (`/admin/settings`) — variable caps without redeploying:
   Free-tier max links (kept at **3** by default), Expanded-tier max links,
-  max avatar upload size (KB), broken-link notification cooldown (days),
-  site tagline
+  max profile-image upload size (KB), directory and country page sizes,
+  featured-directory limit, broken-link notification cooldown (days), site
+  tagline, and Stripe price/portal settings
 - **Link Sources** (`/admin/link-sources`) — the network catalogue behind
   the graphical add-link picker and brand-styled buttons: create/edit,
   domains + `{handle}` pattern, brand colors, icon (built-in or uploaded),
@@ -325,25 +341,41 @@ granted from the Users page.
 
 ## Tests / smoke checks
 
-Two self-contained end-to-end scripts exercise the app with Flask's test
-client (no server or external services needed):
+Self-contained smoke scripts in [`tests/`](./tests/) exercise the app with
+Flask's test client; no running server or external services are required.
+Run them from that directory:
 
 ```bash
-python test_homepage_smoke.py     # landing page, claim box API, static pages,
-                                  # public profiles, auth redirects
-python test_messaging_smoke.py    # register/login → paid-only broadcast →
-                                  # unread badge → read/archive → link-check
-                                  # notifications + cooldown dedupe → recall
+cd tests
+for test in test_*.py; do python "$test" || exit 1; done
 ```
 
-Both use the `testing` config; they exit non-zero if any check fails.
+The suite covers:
+
+- `test_homepage_smoke.py` — landing page, registration, public routes, and
+  static pages
+- `test_messaging_smoke.py` — inbox delivery, read/archive lifecycle, and
+  link-check notifications
+- `test_catalogue_import_smoke.py` — Link Source import/export and validation
+- `test_directory_smoke.py` — source-directory access and adult-content rules
+- `test_country_selector_smoke.py` — country selection, public labels, and
+  directory-card flags
+- `test_profile_background_smoke.py` — paid-only background uploads and image
+  validation
+- `test_stripe_smoke.py` — checkout degradation, Stripe tier sync, webhooks,
+  and billing UI
 
 ## Payments / billing
 
-**Not yet integrated.** Tier changes are currently admin-driven (manual
-upgrade workflow, e.g. after an invoice). Stripe Billing is the planned
-next step: webhook flips `User.tier` + records a `tier_change` activity —
-the admin dashboard already tracks exactly that event.
+Stripe Billing supports self-service upgrades, customer-portal access, and
+signature-verified webhooks. Subscription events synchronize `User.tier` and
+record tier-change activity; administrators can inspect local subscription
+snapshots and Stripe account metrics at `/admin/billing`.
+
+Set `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`,
+and Price IDs (environment variables or the equivalent Admin → Site settings)
+to enable live billing. Without Stripe credentials, billing controls degrade
+gracefully with setup guidance instead of creating checkout sessions.
 
 ## Files & backups
 

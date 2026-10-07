@@ -3,6 +3,9 @@ import os
 import re
 import sys
 import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # Use a temp file DB (via DEV_DATABASE_URL, which config.py reads at import
 # time) instead of :memory: so the in-process cron script

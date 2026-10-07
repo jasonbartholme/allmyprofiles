@@ -21,7 +21,7 @@ DEFAULT_SETTINGS = {
     'free_tier_max_links': '3',        # max active links for Free-tier users
     'expanded_tier_max_links': '10',   # max active links for Expanded tier
     'site_tagline': 'All your links in one place.',
-    'max_upload_size_kb': '2048',      # avatar upload size limit (KB)
+    'max_upload_size_kb': '2048',      # profile-image upload size limit (KB)
     # Broken-link notification spam guard: minimum days between reports
     # about the *same* still-broken link set (used by check_links.py).
     'link_check_notify_days': '7',
@@ -119,6 +119,8 @@ class User(UserMixin, db.Model):
     # Relative path (inside UPLOAD_FOLDER) of a locally-stored uploaded
     # avatar, e.g. "avatars/3-a1b2c3d4.jpg". Set by the dashboard upload form.
     avatar_path = db.Column(db.String(300), nullable=True)
+    # Relative path of a paid-tier custom profile background image.
+    background_path = db.Column(db.String(300), nullable=True)
 
     # Tiering & Monetization
     tier = db.Column(db.String(20), default='Free')  # Free, Expanded, Full, Custom
@@ -267,6 +269,11 @@ class User(UserMixin, db.Model):
         from urllib.parse import quote
         return ('https://ui-avatars.com/api/?background=random&name='
                 + quote(self.display_name or self.username))
+
+    @property
+    def background_src(self):
+        """Public URL for a locally uploaded profile background image."""
+        return url_for_upload(self.background_path) if self.background_path else None
 
 
 def url_for_upload(rel_path):

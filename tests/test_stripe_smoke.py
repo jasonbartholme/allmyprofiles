@@ -6,9 +6,11 @@ subscription object.
 """
 import os
 import sys
+from pathlib import Path
 
 os.environ['FLASK_ENV'] = 'development'
 os.environ.setdefault('SKIP_AUTO_SCHEMA', '')  # exercise dev auto-ALTER
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import stripe_billing  # noqa: E402
 from app import create_app  # noqa: E402
