@@ -63,7 +63,7 @@
           {% for link, username in top_links %}
             <tr>
               <td class="text-muted">{{ loop.index }}</td>
-              <td><a href="{{ url_for('public_profile', username=username) }}">@{{ username }}</a></td>
+              <td><a href="{{ url_for('public_profile', handle=username) }}">@{{ username }}</a></td>
               <td class="text-truncate" style="max-width:280px">{{ link.title }}</td>
               <td class="text-end fw-semibold">{{ link.click_count or 0 }}</td>
             </tr>

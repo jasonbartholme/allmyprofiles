@@ -34,7 +34,7 @@
       </a>
       {# Internal link -> the member's local site (AMP) profile page #}
       <a class="btn btn-sm btn-outline-secondary rounded-pill px-3"
-         href="{{ url_for('public_profile', username=m.user.username) }}">
+         href="{{ (profile_url(m.user) or '#') }}">
         Profile <i class="bi bi-box-arrow-down-left ms-1"></i>
       </a>
     </div>

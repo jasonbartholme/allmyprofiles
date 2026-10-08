@@ -98,7 +98,7 @@
         <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
           {% if current_user.is_authenticated %}
             <li class="nav-item">
-              <a class="nav-link" href="{{ url_for('public_profile', username=current_user.username) }}">
+              <a class="nav-link" href="{{ (profile_url(current_user) or '#') }}">
                 <i class="bi bi-person-circle me-1"></i>My public page
               </a>
             </li>

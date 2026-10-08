@@ -146,7 +146,7 @@
     <div class="row g-4 justify-content-center">
       {% for f in featured %}
       <div class="col-6 col-md-4 col-lg-2">
-        <a href="{{ url_for('public_profile', username=f.user.username) }}"
+        <a href="{{ (profile_url(f.user) or '#') }}"
            class="card h-100 p-3 text-center text-decoration-none lift">
           <img src="{{ f.user.avatar_src }}" class="showcase-avatar rounded-circle mx-auto mb-2"
                alt="{{ f.user.display_name }} profile picture" loading="lazy">

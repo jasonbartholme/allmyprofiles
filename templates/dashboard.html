@@ -37,46 +37,25 @@
   /* Selected-source contextual form panel */
   .source-form {
     border-radius: .75rem; padding: .75rem; margin-top: .5rem;
-    border: 2px dashed #dee2e6; background: #f8f9fa;
-    transition: background-color .15s ease, border-color .15s ease;
+    border: 2px dashed #dee2e6; background: #fff;
+    transition: border-color .15s ease;
   }
   .source-form.active { border-style: solid; }
-  /* Inputs stay on light surfaces even when the panel takes brand colors */
   .source-form input, .source-form select { color-scheme: light; }
-  /* Field labels sit directly on the brand-tinted panel — give them a solid
-     white chip so they stay legible over any network background color. */
-  .source-form .form-label {
-    display: inline-flex; align-items: center; gap: .3rem; max-width: 100%;
-    background: #fff; color: #212529 !important; font-weight: 600;
-    padding: .1rem .5rem; border-radius: .4rem;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+  .dashboard-page .form-label {
+    font-size: .875rem; font-weight: 600; text-transform: none;
   }
-  .source-form .form-label > span { font-weight: 400; color: #495057; }
-  /* Helper text: Bootstrap's default .form-text is low-contrast gray that
-     disappears against brand backgrounds — render it as a high-contrast chip
-     with a leading info icon instead. */
-  .source-form .form-text {
-    display: flex; align-items: baseline; gap: .4rem;
-    color: #212529 !important; font-size: .8rem; opacity: 1 !important;
-    background: #fff; border: 1px solid rgba(0, 0, 0, .15);
-    border-radius: .5rem; padding: .3rem .6rem;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
-  }
-  .source-form .form-text::before {
-    content: '\F05A'; font-family: 'bootstrap-icons';
-    color: var(--bs-primary, #4c8dff); flex: 0 0 auto; transform: translateY(1px);
-  }
-  .source-form .form-text strong { font-weight: 700; }
+  .dashboard-page .btn { font-size: .875rem; text-transform: none; }
   @media (max-width: 575.98px) { .source-picker { grid-template-columns: 1fr 1fr; } }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container py-4">
+<div class="dashboard-page container py-4">
   <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
     <div>
       <h2 class="fw-bold mb-0">Your dashboard</h2>
-      <a href="{{ url_for('public_profile', username=current_user.username) }}"
+      <a href="{{ (profile_url(current_user) or '#') }}"
          class="text-decoration-none small">
         <i class="bi bi-box-arrow-up-right me-1"></i>{{ request.url_root }}u/{{ current_user.username }}
       </a>
@@ -199,7 +178,7 @@
         <h5 class="fw-bold mb-3"><i class="bi bi-plus-circle me-2"></i>Add a new link</h5>
         <form method="POST" action="{{ url_for('add_link') }}">
           <!-- Step 1: pick the network (graphical) -->
-          <label class="form-label fw-semibold small text-uppercase text-muted mb-1"
+             <label class="form-label text-muted mb-1"
                  id="sourcePickerLabel">1 · Link source</label>
           <input type="search" class="form-control form-control-sm src-search"
                  id="sourceSearch" placeholder="Search networks…" autocomplete="off"
@@ -217,7 +196,7 @@
               <input class="form-check-input" type="radio" name="source_id"
                      id="src-{{ s.id }}" value="{{ s.id }}"
                      data-name="{{ s.name }}"
-                     data-bg="{{ s.bg_color }}" data-text="{{ s.text_color }}"
+                     data-border="{{ s.border_color }}"
                      data-icon="bi-{{ s.icon_code or 'link-45deg' }}"
                      data-img="{{ '/uploads/' ~ s.custom_icon_path if s.custom_icon_path else '' }}"
                      data-cta="{{ s.cta or 'Follow' }}"
@@ -242,21 +221,21 @@
           <div class="source-form mt-3" id="sourceForm">
             <div class="row g-2 align-items-end">
               <div class="col-12">
-                <label class="form-label small fw-semibold mb-1" for="urlInput">2 · Profile URL <span id="srcHint" class="fw-normal text-muted"></span></label>
+                <label class="form-label mb-1" for="urlInput">2 · Profile URL <span id="srcHint" class="fw-normal text-muted"></span></label>
                 <input type="text" class="form-control" name="url" id="urlInput" placeholder="https://…" required>
               </div>
               <div class="col-sm-6">
-                <label class="form-label small fw-semibold mb-1" for="titleInput">Title</label>
+                <label class="form-label mb-1" for="titleInput">Title</label>
                 <input type="text" class="form-control" name="title" id="titleInput"
                        placeholder="My GitHub Profile" required maxlength="120">
               </div>
               <div class="col-sm-6">
-                <label class="form-label small fw-semibold mb-1" for="subhandleInput">Handle <span class="fw-normal text-muted">(this network calls it “<span id="handleTerm">handle</span>”)</span></label>
+                <label class="form-label mb-1" for="subhandleInput">Handle <span class="fw-normal text-muted">(this network calls it “<span id="handleTerm">handle</span>”)</span></label>
                 <input type="text" class="form-control" name="subhandle" id="subhandleInput"
                        placeholder="@username (optional)" maxlength="80">
               </div>
               <div class="col-sm-6">
-                <label class="form-label small fw-semibold mb-1" for="ctaInput">Button label</label>
+                <label class="form-label mb-1" for="ctaInput">Button label</label>
                 <div class="input-group">
                   <input type="text" class="form-control" name="cta" id="ctaInput"
                          placeholder="Follow" maxlength="40">
@@ -264,7 +243,7 @@
                 </div>
               </div>
               <div class="col-sm-6">
-                <label class="form-label small fw-semibold mb-1" for="utmInput">UTM params <span class="fw-normal text-muted">(optional)</span></label>
+                <label class="form-label mb-1" for="utmInput">UTM params <span class="fw-normal text-muted">(optional)</span></label>
                 <input type="text" class="form-control font-monospace" name="utm_params" id="utmInput"
                        placeholder="?utm_source=…" maxlength="300">
               </div>
@@ -275,19 +254,6 @@
             </div>
           </div>
 
-          <details class="mt-2">
-            <summary class="text-muted small">Advanced (icon override)</summary>
-            <div class="row g-2 mt-1">
-              <div class="col-sm-4">
-                <select class="form-select form-select-sm" name="icon_code">
-                  {% set icons = ['link-45deg','globe','instagram','twitter-x','youtube','github','linkedin','facebook','tiktok','twitch','whatsapp','telegram','shop','camera-fill','mic-fill','briefcase','envelope','music-note-beamed','play-btn'] %}
-                  {% for icon in icons %}
-                  <option value="{{ icon }}" {{ 'selected' if icon == 'link-45deg' }}>{{ icon }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-            </div>
-          </details>
         </form>
       </div>
     </div>
@@ -527,29 +493,16 @@
       ctaIn.placeholder = d.cta || 'Follow';
       if (ctaDef) ctaDef.disabled = !name;
 
-      // Panel takes the network's brand colors; inputs stay on light chips.
-      const tinted = !!(name && d.bg && d.bg.toLowerCase() !== '#f8f9fa');
-      if (tinted) {
+      if (name) {
         form.classList.add('active');
-        form.style.background = d.bg;
-        form.style.borderColor = d.text;
-        form.style.color = d.text;
-        note.innerHTML = '<strong>' + name + '</strong> selected — its brand colors, icon'
-          + (d.adult ? ' (18+)' : '') + ' and default “' + (d.cta || 'Follow') + '” label will be applied.';
-      } else if (name) {
-        form.classList.add('active');
-        form.style.cssText = '';
-        form.style.borderColor = d.text || '';
+        form.style.borderColor = d.border || '';
         note.innerHTML = '<strong>' + name + '</strong> selected — its brand colors, icon'
           + (d.adult ? ' (18+)' : '') + ' and default “' + (d.cta || 'Follow') + '” label will be applied.';
       } else {
         form.classList.remove('active');
-        form.style.cssText = '';
+        form.style.borderColor = '';
         note.textContent = 'Leave on auto-detect and we’ll match the network from your URL.';
       }
-      // Light-surface inputs need dark text on bright brand panels.
-      const inputs = form.querySelectorAll('input');
-      inputs.forEach(el => { el.classList.toggle('is-on-brand', tinted); });
     }
 
     if (ctaDef) ctaDef.addEventListener('click', () => {

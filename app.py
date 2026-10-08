@@ -403,7 +403,11 @@ def profile_handle(user):
     rule so old links keep resolving.
     """
     slug = display_name_slug(getattr(user, 'display_name', None))
-    return slug or (user.username or '')
+    handle = slug or (user.username or '')
+    # Reserved names (e.g. 'admin') belong to system routes, never profiles.
+    if handle.lower() in RESERVED_USERNAMES or is_reserved_route_segment(handle.lower()):
+        return ''
+    return handle
 
 
 def url_for_profile(user, **kwargs):
@@ -419,7 +423,10 @@ def url_for_profile(user, **kwargs):
         return ''
     if not (getattr(user, 'display_name', None) or '').strip():
         return ''
-    return url_for('public_profile', handle=profile_handle(user), **kwargs)
+    handle = profile_handle(user)
+    if not handle:
+        return ''
+    return url_for('public_profile', handle=handle, **kwargs)
 
 
 def user_by_handle(handle):
@@ -1830,7 +1837,7 @@ def register_routes(app):
             abort(404)
         if not user.is_adult_oriented:
             return redirect(url_for('public_profile',
-                                    username=profile_handle(user)))
+                                    handle=profile_handle(user)))
         if request.form.get('confirm') == 'yes':
             session['age_ok'] = True
             # Remember verification on the account too, so a logged-in user
@@ -1839,7 +1846,7 @@ def register_routes(app):
                 current_user.age_verified = True
                 db.session.commit()
         return redirect(url_for('public_profile',
-                                username=profile_handle(user)))
+                                handle=profile_handle(user)))
 
     # ------------------------------------------------------------------
     # Public Link Source master directory (/directory)
@@ -2568,10 +2575,10 @@ def register_public_interaction_routes(app):
         if not name or not email or not body or len(body) > 5000:
             flash('Please fill in your name, email, and a message '
                   '(max 5000 characters).', 'danger')
-            return redirect(url_for('public_profile', username=profile_handle(user)))
+            return redirect(url_for('public_profile', handle=profile_handle(user)))
         if not CONTACT_EMAIL_RE.match(email):
             flash('That email address looks invalid.', 'danger')
-            return redirect(url_for('public_profile', username=profile_handle(user)))
+            return redirect(url_for('public_profile', handle=profile_handle(user)))
         # Rate limit: max 3 contact messages per IP per hour.
         ip = request.remote_addr
         since = datetime.now() - timedelta(hours=1)
@@ -2582,7 +2589,7 @@ def register_public_interaction_routes(app):
         if recent >= 3:
             flash('You have sent several messages recently. Please try '
                   'again later.', 'warning')
-            return redirect(url_for('public_profile', username=profile_handle(user)))
+            return redirect(url_for('public_profile', handle=profile_handle(user)))
         msg = ContactMessage(recipient_id=user.id, sender_name=name,
                              sender_email=email, subject=subject or None,
                              body=body, sender_ip=ip)
@@ -2969,6 +2976,8 @@ def register_admin_routes(app):
         return render_template('admin/settings.html', settings=settings)
 
     # Expose helpers to templates
+    app.jinja_env.globals['profile_handle'] = profile_handle
+    app.jinja_env.globals['profile_url'] = url_for_profile
     app.jinja_env.globals['is_impersonating'] = _is_impersonating
     app.jinja_env.filters['skills_list'] = normalize_skills
     app.jinja_env.globals['video_embed'] = video_embed
