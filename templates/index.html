@@ -166,6 +166,40 @@
     <div class="text-center mb-4">
       <h2 class="fw-bold">Loved by creators &amp; professionals</h2>
     </div>
+
+    {# ---- Admin-managed testimonials (live from the DB) ----------------
+       The home route passes `testimonials` already filtered by the site
+       display logic: unpublished, "exclude from home" and incomplete rows
+       never reach this loop. Each item's `profile_url` is non-empty only
+       when the author consented to a public profile AND holds an active
+       paid subscription — that is when the icon becomes clickable. #}
+    {% if testimonials %}
+    <div class="row g-4">
+      {% for item in testimonials %}
+      {% set t = item.testimonial %}
+      <div class="col-md-4">
+        <div class="card testimonial-card p-4 h-100">
+          <div class="text-warning mb-2">{% for _ in range(t.rating or 5) %}★{% endfor %}</div>
+          <p class="fst-italic mb-3">&ldquo;{{ t.quote }}&rdquo;</p>
+          <div class="mt-auto d-flex align-items-center gap-2">
+            {% if item.profile_url %}
+            {# Consent + active paid subscription -> clickable profile icon #}
+            <a href="{{ item.profile_url }}" class="text-decoration-none flex-shrink-0"
+               title="View {{ t.author_name }}'s public profile" aria-label="View {{ t.author_name }}'s public profile">
+              <i class="bi bi-person-badge-fill text-primary fs-4"></i>
+            </a>
+            {% else %}
+            <i class="bi bi-person-badge text-muted fs-4 flex-shrink-0" aria-hidden="true"></i>
+            {% endif %}
+            <span class="fw-semibold small">{{ t.author_name }}</span>
+            {% if t.author_role %}<span class="text-muted fw-normal small">&mdash; {{ t.author_role }}</span>{% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    {# Fallback marketing copy while no testimonial qualifies for display #}
     <div class="row g-4">
       <div class="col-md-4">
         <div class="card testimonial-card p-4 h-100">
@@ -192,6 +226,7 @@
         </div>
       </div>
     </div>
+    {% endif %}
   </div>
 </section>
 

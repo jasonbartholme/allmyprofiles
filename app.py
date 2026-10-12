@@ -15,6 +15,7 @@ import json
 import os
 import random
 import re
+import secrets
 from datetime import datetime, timedelta
 
 from flask import (Flask, render_template, request, redirect, url_for, flash,
@@ -27,7 +28,8 @@ from sqlalchemy import func
 from config import config_by_name
 from models import (db, User, Link, Setting, Activity, Message, MessageRead,
                     LinkCheckResult, LinkSource, LinkCategory,
-                    ContactMessage, AbuseReport,
+                    ContactMessage, AbuseReport, Testimonial,
+                    ReviewInvitation, ReviewInviteTemplate,
                     ReplyMacro, SavedView, TriageRule,
                     REPORT_REASONS, REPORT_STATUSES, CONTACT_STATUSES,
                     LINK_CATEGORIES, MESSAGE_CATEGORIES, MESSAGE_SEVERITIES,
@@ -446,6 +448,118 @@ def user_by_handle(handle):
     return User.query.filter_by(username=wanted).first()
 
 
+# ----------------------------------------------------------------------
+# Testimonial display helpers (Admin Testimonial Management story)
+# ----------------------------------------------------------------------
+
+def testimonial_profile_link(t):
+    """Public-profile URL behind a testimonial's clickable profile icon.
+
+    The icon links to the author's public profile page only when BOTH
+    conditions from the acceptance criteria are met:
+      1. the user explicitly consented to a public profile link
+         (``Testimonial.profile_consent``), and
+      2. the user has an active paid subscription — tier is one of
+         PAID_TIERS, i.e. not the free tier.
+
+    Returns '' when either condition fails or the account has no
+    resolvable public profile, so templates render a plain (non-clickable)
+    icon/initials instead of a dead link.
+    """
+    user = getattr(t, 'author', None)
+    if user is None or not t.profile_consent:
+        return ''
+    if (getattr(user, 'tier', 'Free') or 'Free') not in PAID_TIERS:
+        return ''
+    return url_for_profile(user)
+
+
+def testimonial_home_items(limit=None):
+    """Home-page testimonial cards, per the site display logic.
+
+    Automatically excludes testimonials that are unpublished, specifically
+    marked "exclude from home", or flagged incomplete (see
+    ``Testimonial.home_display``). Each item carries the resolved profile
+    link rules via ``testimonial_profile_link``.
+    """
+    q = Testimonial.home_display()
+    rows = q.limit(limit).all() if limit else q.all()
+    items = []
+    for t in rows:
+        items.append({
+            'testimonial': t,
+            'profile_url': testimonial_profile_link(t),
+        })
+    return items
+
+
+# ----------------------------------------------------------------------
+# Review invitation helpers (Story 2: dispatch + dedicated form)
+# ----------------------------------------------------------------------
+
+REVIEW_FLAG_RATING_THRESHOLD = 3   # ratings at or below this are flagged
+REVIEW_INVITE_EXPIRES_DAYS = 30
+
+# Placeholders an admin can use in the invitation template copy. They
+# are filled per-recipient at dispatch time (string.Template style).
+REVIEW_INVITE_PLACEHOLDERS = {
+    'display_name': None,       # filled per recipient
+    'site_name': 'AllMyProfiles',
+    'invite_url': None,         # filled per recipient (absolute form URL)
+}
+
+
+def _invitation_context(user, token):
+    """Placeholder context for rendering one invitation's copy."""
+    invite_url = url_for('review_submit', token=token, _external=True)
+    return {
+        'display_name': (user.display_name or user.username or 'there'),
+        'site_name': 'AllMyProfiles',
+        'invite_url': invite_url,
+    }
+
+
+def create_review_invitation(user, batch_id=None, sender=None,
+                             custom_message=None, commit=False):
+    """Create a ReviewInvitation row and dispatch its notification.
+
+    The invitation is persisted first with its unguessable token, then
+    the rendered template copy goes through the standard inbox pipeline
+    (``send_admin_message``) tagged with the ``review_invite`` category,
+    so every dispatch is auditable like any other admin message on this
+    site. The platform has no external SMTP configured; the delivered
+    inbox message is the automated email-notification layer here.
+    Returns the ReviewInvitation row.
+    """
+    token = secrets.token_urlsafe(32)
+    inv = ReviewInvitation(token=token, user_id=user.id, batch_id=batch_id,
+                           status='pending',
+                           expires_days=REVIEW_INVITE_EXPIRES_DAYS)
+    db.session.add(inv)
+    db.session.flush()  # assign inv.id before linking the message
+
+    tpl = ReviewInviteTemplate.get_default()
+    ctx = _invitation_context(user, token)
+    subject, body = tpl.render(ctx)
+    if custom_message:
+        # Admin-supplied extra line prepended to the default copy.
+        body = custom_message + '\n\n' + body
+
+    message, delivered = send_admin_message(
+        subject=subject, body=body, category='review_invite',
+        sender=sender, source='direct', audience='one', target_user=user,
+        action_url=url_for('review_submit', token=token),
+        action_label='Share your review', commit=False)
+    if message is not None:
+        inv.message_id = message.id
+    Activity.record('review_invite_sent', actor=sender, user=user,
+                    detail=f'review invitation #{inv.id} to {user.email} '
+                           f'(batch {batch_id or "single"})')
+    if commit:
+        db.session.commit()
+    return inv
+
+
 def _ensure_schema(db):
     """Dev-only lightweight schema sync.
 
@@ -547,6 +661,8 @@ def create_app(config_name=None):
     register_link_source_routes(app)
     register_link_category_routes(app)
     register_admin_productivity_routes(app)
+    register_testimonial_routes(app)
+    register_review_routes(app)
     register_error_handlers(app)
     register_template_context(app)
 
@@ -1330,8 +1446,14 @@ def register_routes(app):
                 if len(featured) >= 6:
                     break
 
+        # Social-proof testimonials: admin-managed, live from the DB.
+        # The display logic automatically excludes unpublished, "exclude
+        # from home" and incomplete rows (see Testimonial.home_display).
+        testimonials = testimonial_home_items(limit=6)
+
         return render_template('index.html', stats=stats,
                                featured=featured,
+                               testimonials=testimonials,
                                free_max=Setting.get_int('free_tier_max_links',
                                                         3))
 
@@ -4278,6 +4400,192 @@ def register_admin_productivity_routes(app):
                                pagination=pagination,
                                entries=pagination.items,
                                kind=kind, q=q, kinds=kinds)
+
+
+
+# ==========================================
+# Admin Testimonial Management (CRUD & display rules)
+# ==========================================
+
+def register_testimonial_routes(app):
+    """Full CRUD for home-page social-proof testimonials.
+
+    Display rules enforced here / in the model:
+      * ``is_published``   — master visibility switch.
+      * ``exclude_from_home`` — specifically marked rows never show on /.
+      * ``is_incomplete``  — drafts are automatically excluded by the
+        homepage display logic even when published.
+      * Profile-link icon  — clickable only with explicit consent AND an
+        active paid subscription (see ``testimonial_profile_link``).
+      * Live counter       — "published on display" badge recomputed on
+        every admin page load from ``Testimonial.home_display()``.
+    """
+
+    def _validate_testimonial_form(form, t_id=None):
+        """Validate admin testimonial fields. Returns (errors, cleaned)."""
+        errors = []
+        author_name = (form.get('author_name') or '').strip()
+        if not author_name:
+            errors.append('Author name is required.')
+        elif len(author_name) > 80:
+            errors.append('Author name must be 80 characters or fewer.')
+
+        quote = (form.get('quote') or '').strip()
+        if not quote:
+            errors.append('Quote text is required.')
+        elif len(quote) > 1000:
+            errors.append('Quote must be 1000 characters or fewer.')
+
+        author_role = (form.get('author_role') or '').strip()[:120]
+
+        try:
+            rating = int(form.get('rating') or 5)
+        except ValueError:
+            rating = 5
+            errors.append('Rating must be a whole number between 1 and 5.')
+        else:
+            if not 1 <= rating <= 5:
+                errors.append('Rating must be between 1 and 5.')
+                rating = min(max(rating, 1), 5)
+
+        try:
+            sort_order = int(form.get('sort_order') or 0)
+        except ValueError:
+            sort_order = 0
+
+        user_id = None
+        raw_user = (form.get('user_id') or '').strip()
+        if raw_user:
+            try:
+                user_id = int(raw_user)
+            except ValueError:
+                errors.append('Linked account must be selected from the list.')
+            else:
+                if db.session.get(User, user_id) is None:
+                    errors.append('Linked account does not exist.')
+
+        # Checkbox flags post 'on' when ticked; absent means False.
+        cleaned = {
+            'author_name': author_name,
+            'author_role': author_role,
+            'quote': quote,
+            'rating': rating,
+            'sort_order': sort_order,
+            'user_id': user_id,
+            'profile_consent': bool(form.get('profile_consent')),
+            'is_published': bool(form.get('is_published')),
+            'exclude_from_home': bool(form.get('exclude_from_home')),
+            'is_incomplete': bool(form.get('is_incomplete')),
+        }
+        return errors, cleaned
+
+    @app.route('/admin/testimonials')
+    @admin_required
+    def admin_testimonials():
+        """List all testimonials + live counter of published-on-display."""
+        q = Testimonial.query
+        status = (request.args.get('status') or '').strip()
+        if status == 'published':
+            q = q.filter(Testimonial.is_published.is_(True))
+        elif status == 'draft':
+            q = q.filter(Testimonial.is_published.is_(False))
+        elif status == 'excluded':
+            q = q.filter(db.or_(Testimonial.exclude_from_home.is_(True),
+                                Testimonial.is_incomplete.is_(True)))
+        page = request.args.get('page', 1, type=int)
+        pagination = q.order_by(Testimonial.sort_order,
+                                Testimonial.created_at.desc()).paginate(
+            page=page, per_page=25, error_out=False)
+        # Live display counter: what the home page will actually show right
+        # now (published, unmarked, complete).
+        on_display = Testimonial.home_display().count()
+        total_published = Testimonial.query.filter_by(
+            is_published=True).count()
+        return render_template('admin/testimonials.html',
+                               pagination=pagination,
+                               items=pagination.items,
+                               status=status,
+                               on_display=on_display,
+                               total_published=total_published)
+
+    @app.route('/admin/testimonials/new', methods=['GET', 'POST'])
+    @admin_required
+    def admin_testimonial_new():
+        if request.method == 'POST':
+            errors, data = _validate_testimonial_form(request.form)
+            if errors:
+                for e in errors:
+                    flash(e, 'danger')
+                return render_template('admin/testimonial_form.html',
+                                       t=None, form=request.form), 200 if True else 400
+            t = Testimonial(**data)
+            db.session.add(t)
+            Activity.record('testimonial_created', actor=_real_admin(),
+                            detail=f'created testimonial by "{t.author_name}"')
+            db.session.commit()
+            flash(f'Testimonial by {t.author_name} created.', 'success')
+            return redirect(url_for('admin_testimonials'))
+        next_order = (max((x.sort_order for x in Testimonial.query.all()),
+                          default=-1) + 1)
+        return render_template('admin/testimonial_form.html', t=None,
+                               form={'sort_order': next_order},
+                               users=User.query.order_by(User.username).all())
+
+    @app.route('/admin/testimonials/<int:t_id>/edit', methods=['GET', 'POST'])
+    @admin_required
+    def admin_testimonial_edit(t_id):
+        t = db.session.get(Testimonial, t_id)
+        if t is None:
+            abort(404)
+        if request.method == 'POST':
+            errors, data = _validate_testimonial_form(request.form, t_id=t_id)
+            if errors:
+                for e in errors:
+                    flash(e, 'danger')
+                return render_template('admin/testimonial_form.html',
+                                       t=t, form=request.form)
+            for field, value in data.items():
+                setattr(t, field, value)
+            t.updated_at = datetime.now()
+            Activity.record('testimonial_updated', actor=_real_admin(),
+                            detail=f'edited testimonial #{t.id} '
+                                   f'("{t.author_name}")')
+            db.session.commit()
+            flash('Testimonial updated.', 'success')
+            return redirect(url_for('admin_testimonials'))
+        return render_template('admin/testimonial_form.html', t=t, form=None,
+                               users=User.query.order_by(User.username).all())
+
+    @app.route('/admin/testimonials/<int:t_id>/delete', methods=['POST'])
+    @admin_required
+    def admin_testimonial_delete(t_id):
+        t = db.session.get(Testimonial, t_id)
+        if t is None:
+            abort(404)
+        name = t.author_name
+        db.session.delete(t)
+        Activity.record('testimonial_deleted', actor=_real_admin(),
+                        detail=f'deleted testimonial #{t_id} ("{name}")')
+        db.session.commit()
+        flash(f'Testimonial by {name} deleted.', 'info')
+        return redirect(url_for('admin_testimonials'))
+
+    @app.route('/admin/testimonials/<int:t_id>/toggle', methods=['POST'])
+    @admin_required
+    def admin_testimonial_toggle(t_id):
+        """Quick visibility flip straight from the list view."""
+        t = db.session.get(Testimonial, t_id)
+        if t is None:
+            abort(404)
+        t.is_published = not bool(t.is_published)
+        t.updated_at = datetime.now()
+        Activity.record('testimonial_toggled', actor=_real_admin(),
+                        detail=f'testimonial #{t.id} '
+                               f'{"published" if t.is_published else "unpublished"}')
+        db.session.commit()
+        flash(f'Testimonial {"published" if t.is_published else "unpublished"}.',
+              'success')
+        return redirect(request.referrer or url_for('admin_testimonials'))
 
 
 def _bulk_ids(raw_list):

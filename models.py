@@ -938,6 +938,14 @@ MESSAGE_CATEGORIES = {
     'note':          {'label': 'Personal note',           'default_severity': 'info'},
     'tos_violation': {'label': 'Terms of Service notice', 'default_severity': 'critical'},
     'billing':       {'label': 'Billing / account',       'default_severity': 'info'},
+    # Review invitations (Story 2): automated "share your experience"
+    # requests dispatched by an admin to one or many accounts. Delivered
+    # like any other inbox message but tagged so they can be audited and
+    # attributed back to the originating invitation record.
+    'review_invite': {'label': 'Review invitation',       'default_severity': 'success'},
+    # Direct replies to a testimonial author (Story 3): outreach sent from
+    # inside a testimonial record while resolving negative feedback.
+    'review_reply':  {'label': 'Review reply / outreach', 'default_severity': 'info'},
 }
 
 # Severity levels, ordered by ascending urgency. Drives badge colour and
@@ -1228,3 +1236,248 @@ class TriageRule(db.Model):
             if kw and kw not in (report.details or '').lower():
                 return False
         return True
+
+
+# ==========================================
+# Testimonials (admin-managed social proof)
+# ==========================================
+
+class Testimonial(db.Model):
+    """A piece of user feedback shown as social proof on the marketing
+    home page and managed from Admin -> Testimonials.
+
+    Display rules baked into this story:
+      * ``is_published`` is the master visibility switch — only published
+        rows are ever rendered on the site.
+      * ``exclude_from_home`` lets an admin keep a testimonial published
+        (e.g. for other placements) while hiding it from the home page —
+        the "specifically marked" exclusion of the homepage filtering rule.
+      * ``is_incomplete`` marks drafts/placeholder quotes; the home page
+        display logic automatically excludes them even when published.
+      * ``profile_consent`` records the author's explicit consent to link
+        their public profile. The clickable profile icon additionally
+        requires an active paid subscription (tier in PAID_TIERS) — both
+        conditions must hold (see ``profile_link_url`` helper in app.py).
+    """
+    __tablename__ = 'testimonials'
+
+    id = db.Column(db.Integer, primary_key=True)
+    author_name = db.Column(db.String(80), nullable=False)
+    # Short role/context line under the quote, e.g. "Content Creator".
+    author_role = db.Column(db.String(120), nullable=True)
+    quote = db.Column(db.Text, nullable=False)
+    rating = db.Column(db.Integer, nullable=False, default=5, server_default='5')
+
+    # Optional association with a registered account — powers the profile
+    # link icon and avatar. Nullable so manual/legacy testimonials work.
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True,
+                        index=True)
+    # Explicit user consent to show a link to their public profile.
+    profile_consent = db.Column(db.Boolean, default=False, nullable=False,
+                                server_default='0')
+
+    # Visibility / display-rule flags.
+    is_published = db.Column(db.Boolean, default=False, nullable=False,
+                             server_default='0')
+    exclude_from_home = db.Column(db.Boolean, default=False, nullable=False,
+                                  server_default='0')
+    is_incomplete = db.Column(db.Boolean, default=False, nullable=False,
+                              server_default='0')
+
+    sort_order = db.Column(db.Integer, default=0, nullable=False,
+                           server_default='0')
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(),
+                           index=True)
+    updated_at = db.Column(db.DateTime, nullable=True)
+
+    # --- Moderation / review-resolution workflow (Story 3) -------------
+    # 'pending'   — freshly submitted (e.g. via a review invitation), not
+    #               yet reviewed by an admin; surfaces in the moderation
+    #               queue together with flagged rows.
+    # 'in_resolution' — negative/flagged feedback the admin is actively
+    #               handling after direct outreach to the author.
+    # 'resolved'  — issue addressed; eligible for normal publishing again.
+    # 'dismissed' — reviewed and intentionally kept unpublished.
+    REVIEW_STATUSES = ('pending', 'in_resolution', 'resolved', 'dismissed')
+    resolution_status = db.Column(db.String(20), default='pending',
+                                  nullable=False, server_default='pending',
+                                  index=True)
+    # Low ratings are auto-flagged so they land in the moderation queue
+    # before ever reaching the home page.
+    is_flagged = db.Column(db.Boolean, default=False, nullable=False,
+                           server_default='0')
+    # Internal admin note about the issue / outcome of the outreach.
+    admin_note = db.Column(db.Text, nullable=True)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    # Set when the admin replies directly to the author from the record
+    # page (Story 3 "Direct Reply Workflow").
+    replied_at = db.Column(db.DateTime, nullable=True)
+    replied_by_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                              nullable=True)
+    # Attribution when the quote arrived through a review invitation.
+    invitation_id = db.Column(db.Integer,
+                              db.ForeignKey('review_invitations.id'),
+                              nullable=True, index=True)
+
+    author = db.relationship('User', foreign_keys=[user_id])
+    replied_by = db.relationship('User', foreign_keys=[replied_by_id])
+    invitation = db.relationship('ReviewInvitation',
+                                 foreign_keys=[invitation_id])
+
+    @property
+    def resolution_label(self):
+        return self.RESOLUTION_LABELS.get(self.resolution_status,
+                                          self.resolution_status or 'pending')
+
+    RESOLUTION_LABELS = {
+        'pending': 'Pending review',
+        'in_resolution': 'In Resolution',
+        'resolved': 'Resolved',
+        'dismissed': 'Dismissed',
+    }
+    # Badge colour per status (bootstrap classes used in admin templates).
+    RESOLUTION_BADGES = {
+        'pending': 'secondary',
+        'in_resolution': 'warning',
+        'resolved': 'success',
+        'dismissed': 'dark',
+    }
+
+    @classmethod
+    def moderation_queue(cls):
+        """Pending submissions and flagged reviews awaiting admin action."""
+        return cls.query.filter(db.or_(
+            cls.resolution_status == 'pending',
+            cls.is_flagged.is_(True),
+        )).order_by(cls.created_at.desc())
+
+    @classmethod
+    def home_display(cls):
+        """Homepage display logic (single source of truth).
+
+        Returns the query for testimonials currently eligible for the
+        marketing home page: published, not specifically marked for
+        exclusion, not incomplete — and never negative feedback that is
+        still under moderation (flagged rows must first be resolved or
+        dismissed). Also used for the live "published on display" counter
+        in the admin section.
+        """
+        return cls.query.filter(
+            cls.is_published.is_(True),
+            cls.exclude_from_home.is_(False),
+            cls.is_incomplete.is_(False),
+            db.or_(cls.is_flagged.is_(False),
+                   cls.resolution_status.in_(('resolved', 'dismissed'))),
+        ).order_by(cls.sort_order, cls.created_at.desc())
+
+    def __repr__(self):
+        return f'<Testimonial #{self.id} {self.author_name!r}>'
+
+
+# ==========================================
+# Review invitations (Story 2: admin dispatches
+# "share your experience" requests to users)
+# ==========================================
+
+class ReviewInvitation(db.Model):
+    """An invitation an admin dispatched to one user asking for a review.
+
+    One row per recipient even when the admin selects a batch of accounts,
+    so each link's status can be tracked individually. ``token`` is the
+    unguessable key baked into the submission URL; it expires after
+    ``expires_days`` days. The invited user opens the dedicated form at
+    /review/<token> and their quote lands straight in the ``testimonials``
+    table (isolated persistence — reviews never mix with any other table).
+    """
+    __tablename__ = 'review_invitations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+    # Dispatch batch id: every recipient of one admin action shares it,
+    # which powers the "batch sent to N users" activity log entries.
+    batch_id = db.Column(db.String(32), index=True, nullable=True)
+    message_id = db.Column(db.Integer, db.ForeignKey('messages.id'),
+                           nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(),
+                           index=True)
+    expires_days = db.Column(db.Integer, default=30, nullable=False,
+                             server_default='30')
+    # 'pending' -> 'submitted' (testimonial recorded) or 'expired'.
+    status = db.Column(db.String(20), default='pending', nullable=False,
+                       server_default='pending', index=True)
+    submitted_at = db.Column(db.DateTime, nullable=True)
+    testimonial_id = db.Column(db.Integer, db.ForeignKey('testimonials.id'),
+                               nullable=True)
+
+    user = db.relationship('User', foreign_keys=[user_id])
+    message = db.relationship('Message', foreign_keys=[message_id])
+    testimonial = db.relationship('Testimonial',
+                                  foreign_keys=[testimonial_id],
+                                  backref='originating_invitations')
+
+    @property
+    def is_expired(self):
+        if self.status != 'pending':
+            return False
+        days = self.expires_days if self.expires_days and self.expires_days > 0 else 30
+        return (datetime.now() - self.created_at).days >= days
+
+    @property
+    def is_usable(self):
+        return self.status == 'pending' and not self.is_expired
+
+    def __repr__(self):
+        return f'<ReviewInvitation #{self.id} user={self.user_id} '\
+               f'[{self.status}]>'
+
+
+class ReviewInviteTemplate(db.Model):
+    """Editable copy used when dispatching review invitations.
+
+    Seeded with a sensible default on first use; admins tweak the wording
+    from the Testimonials admin screen. ``{{placeholders}}`` are filled
+    at send time (see REVIEW_INVITE_PLACEHOLDERS in app.py).
+    """
+    __tablename__ = 'review_invite_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False, unique=True)
+    subject = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    updated_at = db.Column(db.DateTime, nullable=True)
+
+    DEFAULT_NAME = 'default'
+    DEFAULT_SUBJECT = 'How has your experience been, {{display_name}}?'
+    DEFAULT_BODY = (
+        'Hi {{display_name}},\n\n'
+        'Thank you for being part of {{site_name}}! We would love to hear '
+        'about your experience — it takes less than two minutes.\n\n'
+        'Share your review here: {{invite_url}}\n\n'
+        'Your feedback may be featured on our home page as social proof. '
+        'With your consent we can link your review to your public profile.\n\n'
+        'Warm regards,\nThe {{site_name}} team'
+    )
+
+    @classmethod
+    def get_default(cls):
+        """Return the default template row, seeding it on first use."""
+        tpl = cls.query.filter_by(name=cls.DEFAULT_NAME).first()
+        if tpl is None:
+            tpl = cls(name=cls.DEFAULT_NAME, subject=cls.DEFAULT_SUBJECT,
+                      body=cls.DEFAULT_BODY)
+            db.session.add(tpl)
+            db.session.flush()
+        return tpl
+
+    def render(self, context=None):
+        """Fill known placeholders; leave unknown {{tokens}} intact."""
+        from string import Template
+        ctx = {k: v for k, v in (context or {}).items()}
+        return (Template(self.subject).safe_substitute(ctx),
+                Template(self.body).safe_substitute(ctx))
+
+    def __repr__(self):
+        return f'<ReviewInviteTemplate {self.name!r}>'
