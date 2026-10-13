@@ -3,6 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% if gtm_id %}
+  <!-- Google Tag Manager -->
+  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer','{{ gtm_id }}');</script>
+  <!-- End Google Tag Manager -->
+  {% endif %}
   <title>{% block title %}AllMyProfiles{% endblock %}</title>
 
   {# ===== Primary meta / indexing directives ===== #}
@@ -93,6 +102,12 @@
   {% block head %}{% endblock %}
 </head>
 <body class="d-flex flex-column min-vh-100">
+  {% if gtm_id %}
+  <!-- Google Tag Manager (noscript) -->
+  <noscript><iframe src="https://www.googletagmanager.com/ns.html?id={{ gtm_id }}"
+  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+  <!-- End Google Tag Manager (noscript) -->
+  {% endif %}
   {# Pages may override these blocks: nav_mode -> "quiet" for a minimal, low-emphasis bar; show_breadcrumbs -> "no" to drop the breadcrumb row. #}
   {% set quiet_nav %}{% block nav_mode %}{% endblock %}{% endset %}
   {% set quiet_nav = quiet_nav|trim == 'quiet' %}

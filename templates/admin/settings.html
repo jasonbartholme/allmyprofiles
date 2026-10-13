@@ -38,6 +38,13 @@
           <input type="text" maxlength="200" class="form-control" id="site_tagline"
                  name="site_tagline" value="{{ settings.site_tagline }}">
         </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="gtm_container_id">Google Tag Manager container ID</label>
+          <input type="text" maxlength="16" class="form-control" id="gtm_container_id"
+                 name="gtm_container_id" value="{{ settings.gtm_container_id }}"
+                 placeholder="GTM-XXXXXXX" pattern="(GTM-[A-Za-z0-9]{4,12})?">
+          <div class="form-text">Loaded on every page. Leave blank to disable.</div>
+        </div>
         <div class="col-12 pt-3 border-top mt-2">
           <h3 class="h6 fw-bold mb-0"><i class="bi bi-diagram-3 me-2"></i>Public directory (<code>/directory</code>)</h3>
           <div class="form-text mb-2">Controls how Link Source detail pages list member profiles.</div>

@@ -42,6 +42,8 @@ DEFAULT_SETTINGS = {
     'stripe_price_expanded': '',      # Expanded tier subscription price
     'stripe_price_full': '',          # Full tier subscription price
     'stripe_customer_portal_return': '/dashboard',  # portal "back to site" URL
+    # Google Tag Manager container ID (GTM-XXXXXXX). Blank disables the tag.
+    'gtm_container_id': '',
 }
 
 

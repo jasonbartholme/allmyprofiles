@@ -3107,7 +3107,8 @@ def register_admin_routes(app):
                     'country_page_size', 'country_sidebar_top',
                     # Stripe billing config (price IDs + portal return URL).
                     'stripe_price_expanded', 'stripe_price_full',
-                    'stripe_customer_portal_return']
+                    'stripe_customer_portal_return',
+                    'gtm_container_id']
         numeric = {'free_tier_max_links', 'expanded_tier_max_links',
                    'max_upload_size_kb', 'link_check_notify_days',
                    'directory_page_size', 'directory_featured_max',
@@ -3128,6 +3129,12 @@ def register_admin_routes(app):
                         value = str(max(0, int(value)))
                     except ValueError:
                         flash(f'"{key}" must be a number.', 'danger')
+                        return redirect(url_for('admin_settings'))
+                if key == 'gtm_container_id':
+                    value = value.upper()
+                    if value and not re.fullmatch(r'GTM-[A-Z0-9]{4,12}', value):
+                        flash('Google Tag Manager ID must look like '
+                              'GTM-XXXXXXX.', 'danger')
                         return redirect(url_for('admin_settings'))
                 Setting.set_value(key, value)
             Activity.record('settings_update', actor=_real_admin(),
@@ -5432,6 +5439,12 @@ def register_error_handlers(app):
         return redirect(request.referrer or url_for('dashboard'))
 
 
+def _valid_gtm_id(value):
+    """Return a well-formed GTM container ID, else '' (tag disabled)."""
+    value = (value or '').strip().upper()
+    return value if re.fullmatch(r'GTM-[A-Z0-9]{4,12}', value) else ''
+
+
 def register_template_context(app):
 
     @app.context_processor
@@ -5471,6 +5484,7 @@ def register_template_context(app):
             'datetime': datetime,  # templates: period-end timestamps -> dates
             'APP_ENV': os.environ.get('FLASK_ENV', 'development'),
             'site_tagline': Setting.get('site_tagline'),
+            'gtm_id': _valid_gtm_id(Setting.get('gtm_container_id')),
             'TIERS': TIERS,
             'unread_count': unread,
             'canonical_url': canonical_url,
