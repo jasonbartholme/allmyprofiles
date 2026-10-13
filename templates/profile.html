@@ -1,4 +1,6 @@
 {% extends 'base.html' %}
+{% block nav_mode %}quiet{% endblock %}
+{% block show_breadcrumbs %}no{% endblock %}
 {% block title %}{{ user.display_name }} (@{{ user.username }}) — AllMyProfiles{% endblock %}
 {% block breadcrumb_title %}{{ user.display_name }}{% endblock %}
 {% block description %}{{ user.headline or (user.display_name ~ ' — all my profiles in one place.') }}{% endblock %}
@@ -94,7 +96,7 @@
     {% if user.country_name or user.location %}
     <p class="text-white-50 small mb-1"><i class="bi bi-geo-alt me-1"></i>{{ user.country_name or user.location }}</p>
     {% endif %}
-    {% if user.headline %}<p class="fw-semibold text-white">{{ user.headline }}</p>{% endif %}
+    {% if user.headline %}<h2 class="fs-6 lh-base mb-3 fw-semibold text-white">{{ user.headline }}</h2>{% endif %}
     {% if user.bio %}<p class="text-white-50">{{ user.bio }}</p>{% endif %}
     {% if skills %}
     <div class="d-flex flex-wrap justify-content-center gap-2 mt-2" aria-label="Skills">
@@ -135,7 +137,7 @@
 
     {% if user.about_section %}
     <div class="card p-4 mt-4 text-start">
-      <h5 class="fw-bold">About</h5>
+      <h2 class="h5 fw-bold">About</h2>
       <p class="mb-0" style="white-space: pre-wrap;">{{ user.about_section }}</p>
     </div>
     {% endif %}

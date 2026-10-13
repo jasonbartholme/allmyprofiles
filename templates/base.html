@@ -79,6 +79,8 @@
     .sev-warning { border-left-color: #ffc107 !important; }
     .sev-success { border-left-color: #198754 !important; }
     .msg-body { white-space: pre-wrap; }
+    .navbar-quiet { background: transparent; font-size: .875rem; }
+    .navbar-quiet .nav-link, .navbar-quiet .navbar-brand { color: #6c757d; }
     .site-breadcrumb a { color: inherit; text-decoration: none; }
     .site-breadcrumb a:hover { text-decoration: underline; }
     .site-breadcrumb {
@@ -91,13 +93,23 @@
   {% block head %}{% endblock %}
 </head>
 <body class="d-flex flex-column min-vh-100">
-  <nav class="navbar navbar-expand-lg bg-white shadow-sm">
+  {# Pages may override these blocks: nav_mode -> "quiet" for a minimal, low-emphasis bar; show_breadcrumbs -> "no" to drop the breadcrumb row. #}
+  {% set quiet_nav %}{% block nav_mode %}{% endblock %}{% endset %}
+  {% set quiet_nav = quiet_nav|trim == 'quiet' %}
+  {% set show_crumbs %}{% block show_breadcrumbs %}{% endblock %}{% endset %}
+  {% set show_crumbs = show_crumbs|trim != 'no' %}
+  <a class="visually-hidden-focusable position-absolute m-2 p-2 bg-white rounded" href="#main-content" style="z-index:2000;">Skip to main content</a>
+  <header>
+  <nav class="navbar navbar-expand-lg {{ 'navbar-quiet py-1' if quiet_nav else 'bg-white shadow-sm' }}" aria-label="Primary">
     <div class="container">
-      <a class="navbar-brand text-primary" href="{{ url_for('home') }}">
-        <img src="{{ url_for('static', filename='images/favicon-96x96.png') }}" alt="" width="28" height="28" class="me-2 align-text-bottom rounded">AllMyProfiles
+      <a class="navbar-brand {{ 'text-muted fw-normal fs-6' if quiet_nav else 'text-primary' }}" href="{{ url_for('home') }}">
+        <img src="{{ url_for('static', filename='images/favicon-96x96.png') }}" alt="" width="{{ 20 if quiet_nav else 28 }}" height="{{ 20 if quiet_nav else 28 }}" class="me-2 align-text-bottom rounded">AllMyProfiles
       </a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+      <button class="navbar-toggler position-relative" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
+        {% if current_user.is_authenticated and unread_count %}
+          <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">{{ unread_count }}<span class="visually-hidden"> unread messages</span></span>
+        {% endif %}
       </button>
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
@@ -117,7 +129,7 @@
               <a class="nav-link position-relative" href="{{ url_for('inbox') }}">
                 <i class="bi bi-envelope me-1"></i>Inbox
                 {% if unread_count %}
-                  <span class="badge rounded-pill bg-danger">{{ unread_count }}</span>
+                  <span class="badge rounded-pill bg-danger">{{ unread_count }}<span class="visually-hidden"> unread messages</span></span>
                 {% endif %}
               </a>
             </li>
@@ -131,17 +143,20 @@
             <li class="nav-item">
               <a class="btn btn-outline-primary btn-sm rounded-pill px-3" href="{{ url_for('logout') }}">Log out</a>
             </li>
+          {% elif quiet_nav %}
+            <li class="nav-item"><a class="btn btn-outline-primary btn-sm rounded-pill px-3" href="{{ url_for('register') }}" rel="nofollow">Sign up free</a></li>
           {% else %}
             <li class="nav-item"><a class="nav-link" href="{{ url_for('directory') }}">Directory</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('login') }}">Log in</a></li>
-            <li class="nav-item"><a class="btn btn-primary btn-sm rounded-pill px-3" href="{{ url_for('register') }}">Sign up free</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('login') }}" rel="nofollow">Log in</a></li>
+            <li class="nav-item"><a class="btn btn-primary btn-sm rounded-pill px-3" href="{{ url_for('register') }}" rel="nofollow">Sign up free</a></li>
           {% endif %}
         </ul>
       </div>
     </div>
   </nav>
+  </header>
 
-  <main class="flex-grow-1">
+  <main id="main-content" class="flex-grow-1">
     {% if is_impersonating() %}
     <div class="bg-danger text-white text-center py-2 small fw-semibold shadow-sm">
       <i class="bi bi-incognito me-1"></i>
@@ -163,6 +178,7 @@
         </div>
       {% endif %}
     {% endwith %}
+    {% if show_crumbs %}
     <nav class="container pt-3" aria-label="Breadcrumb">
       <ol class="site-breadcrumb list-unstyled d-flex flex-wrap align-items-center gap-2 mb-0 small text-muted">
         <li><a href="{{ url_for('home') }}">Home</a></li>
@@ -170,6 +186,7 @@
         <li aria-current="page">{% block breadcrumb_title %}{{ self.title() | striptags | replace(' — AllMyProfiles', '') | replace(' — All My Profiles', '') | replace(' — Admin', '') }}{% endblock %}</li>
       </ol>
     </nav>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
 
@@ -191,7 +208,7 @@
           </div>
         </div>
         <div class="col-6 col-lg-2 offset-lg-1">
-          <h6 class="fw-bold small text-uppercase">Product</h6>
+          <h2 class="fw-bold small text-uppercase">Product</h2>
           <ul class="list-unstyled small">
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('home') }}#features">Features</a></li>
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('home') }}#pricing">Pricing</a></li>
@@ -201,7 +218,7 @@
           </ul>
         </div>
         <div class="col-6 col-lg-2">
-          <h6 class="fw-bold small text-uppercase">Support</h6>
+          <h2 class="fw-bold small text-uppercase">Support</h2>
           <ul class="list-unstyled small">
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('directory') }}">Social Networks</a></li>
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('suggest') }}">Suggest a Social Network</a></li>
@@ -212,7 +229,7 @@
           </ul>
         </div>
         <div class="col-6 col-lg-2">
-          <h6 class="fw-bold small text-uppercase">Legal</h6>
+          <h2 class="fw-bold small text-uppercase">Legal</h2>
           <ul class="list-unstyled small">
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('terms') }}">Terms of Service</a></li>
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('privacy') }}">Privacy Policy</a></li>

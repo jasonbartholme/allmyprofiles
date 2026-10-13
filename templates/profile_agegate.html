@@ -22,7 +22,7 @@
     </p>
     <p class="small text-muted">By continuing you confirm that you are at least
       18 years old (or the age of majority where you live).</p>
-    <form method="post" action="{{ url_for('confirm_age', username=user.username) }}"
+    <form method="post" action="{{ url_for('confirm_age', handle=user.username) }}"
           class="d-grid gap-2 mt-3">
       <button type="submit" name="confirm" value="yes" class="btn btn-primary btn-lg">
         I am 18 or older — continue
