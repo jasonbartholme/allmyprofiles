@@ -1370,8 +1370,126 @@ class Testimonial(db.Model):
                    cls.resolution_status.in_(('resolved', 'dismissed'))),
         ).order_by(cls.sort_order, cls.created_at.desc())
 
+    @classmethod
+    def section_display(cls, section):
+        """Return testimonials eligible to render in a content section."""
+        query = cls.query.join(cls.content_sections).filter(
+            ContentSection.id == section.id,
+            ContentSection.is_active.is_(True),
+            cls.is_published.is_(True),
+            cls.is_incomplete.is_(False),
+            db.or_(cls.is_flagged.is_(False),
+                   cls.resolution_status.in_(('resolved', 'dismissed'))),
+        )
+        if section.slug == 'homepage-testimonials':
+            query = query.filter(cls.exclude_from_home.is_(False))
+        return query.order_by(cls.sort_order, cls.created_at.desc())
+
     def __repr__(self):
         return f'<Testimonial #{self.id} {self.author_name!r}>'
+
+
+class TestimonialReply(db.Model):
+    """An admin response and resolution-history entry for a testimonial."""
+    __tablename__ = 'testimonial_replies'
+
+    RESOLUTION_STATUSES = ('pending', 'in_resolution', 'resolved', 'dismissed')
+
+    id = db.Column(db.Integer, primary_key=True)
+    testimonial_id = db.Column(
+        db.Integer, db.ForeignKey('testimonials.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    admin_user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                              nullable=True, index=True)
+    message = db.Column(db.Text, nullable=False)
+    dispatched_at = db.Column(db.DateTime, nullable=True, index=True)
+    resolution_status = db.Column(db.String(20), nullable=False,
+                                  default='pending',
+                                  server_default='pending', index=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(),
+                           nullable=True)
+
+    testimonial = db.relationship(
+        'Testimonial',
+        backref=db.backref('replies', cascade='all, delete-orphan',
+                           order_by='TestimonialReply.created_at'))
+    admin_user = db.relationship('User')
+
+    def __repr__(self):
+        return f'<TestimonialReply #{self.id} testimonial={self.testimonial_id}>'
+
+
+testimonial_sections = db.Table(
+    'testimonial_sections',
+    db.Column('testimonial_id', db.Integer,
+              db.ForeignKey('testimonials.id', ondelete='CASCADE'),
+              primary_key=True),
+    db.Column('content_section_id', db.Integer,
+              db.ForeignKey('content_sections.id', ondelete='CASCADE'),
+              primary_key=True),
+)
+
+
+class ContentSection(db.Model):
+    """A site placement where assigned testimonials can be displayed."""
+    __tablename__ = 'content_sections'
+
+    DEFAULT_SECTIONS = (
+        ('homepage-testimonials', 'Home page testimonials',
+         'The home page social-proof area.'),
+        ('homepage-features', 'Home page features',
+         'The features section on the home page.'),
+        ('homepage-demo', 'Home page interactive demo',
+         'The interactive demo section on the home page.'),
+        ('homepage-pricing', 'Home page pricing',
+         'The pricing section on the home page.'),
+        ('homepage-faq', 'Home page FAQ',
+         'The frequently asked questions section on the home page.'),
+        ('homepage-final-cta', 'Home page final call to action',
+         'The closing call-to-action section on the home page.'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    slug = db.Column(db.String(100), nullable=False, unique=True, index=True)
+    description = db.Column(db.String(250), nullable=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0,
+                           server_default='0')
+    is_active = db.Column(db.Boolean, nullable=False, default=True,
+                          server_default='1')
+
+    testimonials = db.relationship(
+        'Testimonial', secondary=testimonial_sections,
+        backref=db.backref('content_sections', lazy='select'))
+
+    @property
+    def active_testimonial_count(self):
+        return Testimonial.section_display(self).count()
+
+    @classmethod
+    def seed_defaults(cls):
+        """Seed current site placements and preserve existing homepage cards."""
+        existing = {section.slug for section in cls.query.all()}
+        homepage_was_missing = 'homepage-testimonials' not in existing
+        for position, (slug, name, description) in enumerate(
+                cls.DEFAULT_SECTIONS):
+            if slug not in existing:
+                db.session.add(cls(
+                    name=name,
+                    slug=slug,
+                    description=description,
+                    sort_order=position,
+                ))
+        db.session.flush()
+        section = cls.query.filter_by(slug='homepage-testimonials').one()
+        if homepage_was_missing:
+            for testimonial in Testimonial.home_display().all():
+                testimonial.content_sections.append(section)
+        db.session.commit()
+        return section
+
+    def __repr__(self):
+        return f'<ContentSection {self.slug!r}>'
 
 
 # ==========================================

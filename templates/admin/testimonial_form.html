@@ -1,0 +1,101 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% set is_edit = t is not none %}
+{% set values = form if form else t %}
+{% block title %}Admin · {{ 'Edit' if is_edit else 'New' }} Testimonial — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 900px">
+  <h2 class="fw-bold mb-3">
+    <i class="bi bi-chat-quote text-primary me-2"></i>{{ 'Edit' if is_edit else 'New' }} testimonial
+  </h2>
+  {{ dash.nav('testimonials') }}
+
+  <form method="POST" class="card p-4">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label" for="author_name">Author name</label>
+        <input id="author_name" name="author_name" class="form-control" maxlength="80"
+               value="{{ values.author_name or '' }}" required>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="author_role">Author role</label>
+        <input id="author_role" name="author_role" class="form-control" maxlength="120"
+               value="{{ values.author_role or '' }}" placeholder="e.g. Content creator">
+      </div>
+      <div class="col-12">
+        <label class="form-label" for="quote">Feedback</label>
+        <textarea id="quote" name="quote" class="form-control" rows="4" maxlength="1000"
+                  required>{{ values.quote or '' }}</textarea>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="rating">Rating</label>
+        <select id="rating" name="rating" class="form-select">
+          {% for rating in range(1, 6) %}
+          <option value="{{ rating }}" {{ 'selected' if values.rating == rating }}>{{ rating }} / 5</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="sort_order">Display order</label>
+        <input id="sort_order" name="sort_order" type="number" class="form-control"
+               value="{{ values.sort_order or 0 }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="user_id">Linked user account</label>
+        <select id="user_id" name="user_id" class="form-select">
+          <option value="">No linked account</option>
+          {% for user in users %}
+          <option value="{{ user.id }}" {{ 'selected' if values.user_id == user.id }}>
+            {{ user.display_name or user.username }} (@{{ user.username }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-12">
+        <label class="form-label" for="section_ids">Site content sections</label>
+        <select id="section_ids" name="section_ids" class="form-select" multiple size="4"
+                aria-describedby="sections-help">
+          {% for section in sections %}
+          <option value="{{ section.id }}"
+            {{ 'selected' if section.id in selected_section_ids }}>{{ section.name }}</option>
+          {% endfor %}
+        </select>
+        <div id="sections-help" class="form-text">
+          Select every site section where this testimonial should be eligible to appear.
+          An active testimonial must also be published and pass moderation checks.
+          <a href="{{ url_for('admin_content_sections') }}">View section counts</a>.
+        </div>
+      </div>
+
+      <div class="col-12">
+        <div class="form-check">
+          <input id="is_published" name="is_published" type="checkbox" class="form-check-input"
+                 {{ 'checked' if values.is_published }}>
+          <label class="form-check-label" for="is_published">Published</label>
+        </div>
+        <div class="form-check">
+          <input id="exclude_from_home" name="exclude_from_home" type="checkbox" class="form-check-input"
+                 {{ 'checked' if values.exclude_from_home }}>
+          <label class="form-check-label" for="exclude_from_home">Exclude from home page</label>
+        </div>
+        <div class="form-check">
+          <input id="is_incomplete" name="is_incomplete" type="checkbox" class="form-check-input"
+                 {{ 'checked' if values.is_incomplete }}>
+          <label class="form-check-label" for="is_incomplete">Incomplete / placeholder feedback</label>
+        </div>
+        <div class="form-check">
+          <input id="profile_consent" name="profile_consent" type="checkbox" class="form-check-input"
+                 {{ 'checked' if values.profile_consent }}>
+          <label class="form-check-label" for="profile_consent">Author consented to public profile link</label>
+        </div>
+      </div>
+    </div>
+    <div class="d-flex gap-2 mt-4">
+      <button class="btn btn-primary">{{ 'Save changes' if is_edit else 'Create testimonial' }}</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('admin_testimonials') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

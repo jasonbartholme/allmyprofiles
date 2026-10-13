@@ -28,7 +28,7 @@ from sqlalchemy import func
 from config import config_by_name
 from models import (db, User, Link, Setting, Activity, Message, MessageRead,
                     LinkCheckResult, LinkSource, LinkCategory,
-                    ContactMessage, AbuseReport, Testimonial,
+                    ContactMessage, AbuseReport, Testimonial, ContentSection,
                     ReviewInvitation, ReviewInviteTemplate,
                     ReplyMacro, SavedView, TriageRule,
                     REPORT_REASONS, REPORT_STATUSES, CONTACT_STATUSES,
@@ -477,12 +477,20 @@ def testimonial_profile_link(t):
 def testimonial_home_items(limit=None):
     """Home-page testimonial cards, per the site display logic.
 
-    Automatically excludes testimonials that are unpublished, specifically
-    marked "exclude from home", or flagged incomplete (see
-    ``Testimonial.home_display``). Each item carries the resolved profile
-    link rules via ``testimonial_profile_link``.
+    Only testimonials assigned to the homepage placement and currently
+    eligible for display are returned. Each item carries the resolved
+    profile-link rules via ``testimonial_profile_link``.
     """
-    q = Testimonial.home_display()
+    section = ContentSection.query.filter_by(
+        slug='homepage-testimonials', is_active=True).first()
+    if section is None:
+        return []
+    return testimonial_section_items(section, limit=limit)
+
+
+def testimonial_section_items(section, limit=3):
+    """Build display-ready cards assigned to a particular site placement."""
+    q = Testimonial.section_display(section)
     rows = q.limit(limit).all() if limit else q.all()
     items = []
     for t in rows:
@@ -491,6 +499,17 @@ def testimonial_home_items(limit=None):
             'profile_url': testimonial_profile_link(t),
         })
     return items
+
+
+def testimonial_home_placements():
+    """Display-ready testimonial lists keyed by their home-page placement."""
+    sections = ContentSection.query.filter_by(is_active=True).order_by(
+        ContentSection.sort_order, ContentSection.name).all()
+    return {
+        section.slug: testimonial_section_items(section)
+        for section in sections
+        if section.slug != 'homepage-testimonials'
+    }
 
 
 # ----------------------------------------------------------------------
@@ -645,6 +664,7 @@ def create_app(config_name=None):
             Setting.seed_defaults()
             LinkSource.seed_defaults()
             LinkCategory.seed_defaults()
+            ContentSection.seed_defaults()
             # One-time-ish backfill so pre-existing locations get country
             # buckets (idempotent; cheap on dev DBs).
             backfill_country_fields()
@@ -662,7 +682,6 @@ def create_app(config_name=None):
     register_link_category_routes(app)
     register_admin_productivity_routes(app)
     register_testimonial_routes(app)
-    register_review_routes(app)
     register_error_handlers(app)
     register_template_context(app)
 
@@ -1446,14 +1465,13 @@ def register_routes(app):
                 if len(featured) >= 6:
                     break
 
-        # Social-proof testimonials: admin-managed, live from the DB.
-        # The display logic automatically excludes unpublished, "exclude
-        # from home" and incomplete rows (see Testimonial.home_display).
+        # Social-proof testimonials assigned to the homepage placement.
         testimonials = testimonial_home_items(limit=6)
 
         return render_template('index.html', stats=stats,
                                featured=featured,
                                testimonials=testimonials,
+                               testimonial_placements=testimonial_home_placements(),
                                free_max=Setting.get_int('free_tier_max_links',
                                                         3))
 
@@ -4464,6 +4482,23 @@ def register_testimonial_routes(app):
                 if db.session.get(User, user_id) is None:
                     errors.append('Linked account does not exist.')
 
+        section_ids = []
+        for raw_section_id in form.getlist('section_ids'):
+            try:
+                section_id = int(raw_section_id)
+            except (TypeError, ValueError):
+                errors.append('Content section selection is invalid.')
+                continue
+            if section_id not in section_ids:
+                section_ids.append(section_id)
+        valid_section_ids = {
+            section.id for section in ContentSection.query.filter(
+                ContentSection.id.in_(section_ids),
+                ContentSection.is_active.is_(True)).all()
+        } if section_ids else set()
+        if valid_section_ids != set(section_ids):
+            errors.append('Choose only active content sections.')
+
         # Checkbox flags post 'on' when ticked; absent means False.
         cleaned = {
             'author_name': author_name,
@@ -4476,6 +4511,7 @@ def register_testimonial_routes(app):
             'is_published': bool(form.get('is_published')),
             'exclude_from_home': bool(form.get('exclude_from_home')),
             'is_incomplete': bool(form.get('is_incomplete')),
+            'section_ids': section_ids,
         }
         return errors, cleaned
 
@@ -4496,9 +4532,26 @@ def register_testimonial_routes(app):
         pagination = q.order_by(Testimonial.sort_order,
                                 Testimonial.created_at.desc()).paginate(
             page=page, per_page=25, error_out=False)
-        # Live display counter: what the home page will actually show right
-        # now (published, unmarked, complete).
-        on_display = Testimonial.home_display().count()
+        # Live display counter reflects actual assignment to the home page.
+        homepage_slugs = [slug for slug, _, _ in
+                          ContentSection.DEFAULT_SECTIONS]
+        on_display = (Testimonial.query
+                      .join(Testimonial.content_sections)
+                      .filter(
+                          ContentSection.slug.in_(homepage_slugs),
+                          ContentSection.is_active.is_(True),
+                          Testimonial.is_published.is_(True),
+                          Testimonial.is_incomplete.is_(False),
+                          db.or_(
+                              Testimonial.is_flagged.is_(False),
+                              Testimonial.resolution_status.in_(
+                                  ('resolved', 'dismissed')),
+                          ),
+                          db.or_(
+                              ContentSection.slug != 'homepage-testimonials',
+                              Testimonial.exclude_from_home.is_(False),
+                          ),
+                      ).distinct().count())
         total_published = Testimonial.query.filter_by(
             is_published=True).count()
         return render_template('admin/testimonials.html',
@@ -4506,7 +4559,18 @@ def register_testimonial_routes(app):
                                items=pagination.items,
                                status=status,
                                on_display=on_display,
-                               total_published=total_published)
+                               total_published=total_published,
+                               sections=ContentSection.query.order_by(
+                                   ContentSection.sort_order,
+                                   ContentSection.name).all())
+
+    @app.route('/admin/content-sections')
+    @admin_required
+    def admin_content_sections():
+        sections = ContentSection.query.order_by(
+            ContentSection.sort_order, ContentSection.name).all()
+        return render_template('admin/content_sections.html',
+                               sections=sections)
 
     @app.route('/admin/testimonials/new', methods=['GET', 'POST'])
     @admin_required
@@ -4517,8 +4581,22 @@ def register_testimonial_routes(app):
                 for e in errors:
                     flash(e, 'danger')
                 return render_template('admin/testimonial_form.html',
-                                       t=None, form=request.form), 200 if True else 400
+                                       t=None, form=request.form,
+                                       users=User.query.order_by(
+                                           User.username).all(),
+                                       sections=ContentSection.query.filter_by(
+                                           is_active=True).order_by(
+                                               ContentSection.sort_order,
+                                               ContentSection.name).all(),
+                                       selected_section_ids=[
+                                           int(value) for value in
+                                           request.form.getlist('section_ids')
+                                           if value.isdigit()])
+            section_ids = data.pop('section_ids', [])
             t = Testimonial(**data)
+            t.content_sections = ContentSection.query.filter(
+                ContentSection.id.in_(section_ids),
+                ContentSection.is_active.is_(True)).all()
             db.session.add(t)
             Activity.record('testimonial_created', actor=_real_admin(),
                             detail=f'created testimonial by "{t.author_name}"')
@@ -4529,7 +4607,12 @@ def register_testimonial_routes(app):
                           default=-1) + 1)
         return render_template('admin/testimonial_form.html', t=None,
                                form={'sort_order': next_order},
-                               users=User.query.order_by(User.username).all())
+                               users=User.query.order_by(User.username).all(),
+                               sections=ContentSection.query.filter_by(
+                                   is_active=True).order_by(
+                                       ContentSection.sort_order,
+                                       ContentSection.name).all(),
+                               selected_section_ids=[])
 
     @app.route('/admin/testimonials/<int:t_id>/edit', methods=['GET', 'POST'])
     @admin_required
@@ -4543,9 +4626,23 @@ def register_testimonial_routes(app):
                 for e in errors:
                     flash(e, 'danger')
                 return render_template('admin/testimonial_form.html',
-                                       t=t, form=request.form)
+                                       t=t, form=request.form,
+                                       users=User.query.order_by(
+                                           User.username).all(),
+                                       sections=ContentSection.query.filter_by(
+                                           is_active=True).order_by(
+                                               ContentSection.sort_order,
+                                               ContentSection.name).all(),
+                                       selected_section_ids=[
+                                           int(value) for value in
+                                           request.form.getlist('section_ids')
+                                           if value.isdigit()])
+            section_ids = data.pop('section_ids', [])
             for field, value in data.items():
                 setattr(t, field, value)
+            t.content_sections = ContentSection.query.filter(
+                ContentSection.id.in_(section_ids),
+                ContentSection.is_active.is_(True)).all()
             t.updated_at = datetime.now()
             Activity.record('testimonial_updated', actor=_real_admin(),
                             detail=f'edited testimonial #{t.id} '
@@ -4554,7 +4651,13 @@ def register_testimonial_routes(app):
             flash('Testimonial updated.', 'success')
             return redirect(url_for('admin_testimonials'))
         return render_template('admin/testimonial_form.html', t=t, form=None,
-                               users=User.query.order_by(User.username).all())
+                               users=User.query.order_by(User.username).all(),
+                               sections=ContentSection.query.filter_by(
+                                   is_active=True).order_by(
+                                       ContentSection.sort_order,
+                                       ContentSection.name).all(),
+                               selected_section_ids=[
+                                   section.id for section in t.content_sections])
 
     @app.route('/admin/testimonials/<int:t_id>/delete', methods=['POST'])
     @admin_required

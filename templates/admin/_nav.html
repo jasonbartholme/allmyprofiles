@@ -4,6 +4,10 @@
     <i class="bi bi-speedometer2 me-1"></i>Overview</a></li>
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='users' }}" href="{{ url_for('admin_users') }}">
     <i class="bi bi-people me-1"></i>Users</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if active=='testimonials' }}" href="{{ url_for('admin_testimonials') }}">
+    <i class="bi bi-chat-quote me-1"></i>Testimonials</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if active=='content-sections' }}" href="{{ url_for('admin_content_sections') }}">
+    <i class="bi bi-grid me-1"></i>Content Sections</a></li>
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='reports' }}" href="{{ url_for('admin_reports') }}">
     <i class="bi bi-flag me-1"></i>Reports</a></li>
   <li class="nav-item"><a class="nav-link {{ 'active' if active=='messages' }}" href="{{ url_for('admin_messages') }}">

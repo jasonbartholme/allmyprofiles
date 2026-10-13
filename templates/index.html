@@ -51,6 +51,32 @@
 {% endblock %}
 
 {% block content %}
+{% macro assigned_testimonial_cards(items) %}
+{% if items %}
+<div class="container py-3">
+  <div class="row g-3">
+    {% for item in items %}
+    {% set t = item.testimonial %}
+    <div class="col-md-4">
+      <div class="card testimonial-card p-3 h-100">
+        <div class="text-warning small mb-1">{% for _ in range(t.rating or 5) %}★{% endfor %}</div>
+        <p class="fst-italic small mb-2">&ldquo;{{ t.quote }}&rdquo;</p>
+        <div class="mt-auto small fw-semibold">
+          {% if item.profile_url %}
+          <a href="{{ item.profile_url }}" class="text-decoration-none">{{ t.author_name }}</a>
+          {% else %}
+          {{ t.author_name }}
+          {% endif %}
+          {% if t.author_role %}<span class="text-muted fw-normal">&mdash; {{ t.author_role }}</span>{% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
+
 {#============================ 1. HERO ============================#}
 <section class="hero py-5">
   <div class="container py-4">
@@ -293,6 +319,7 @@
     </div>
   </div>
 </section>
+{{ assigned_testimonial_cards(testimonial_placements.get('homepage-features', [])) }}
 
 {#================= 5. LIVE SANDBOX DEMO =================#}
 <section class="py-5 bg-white" id="demo">
@@ -336,6 +363,7 @@
     </div>
   </div>
 </section>
+{{ assigned_testimonial_cards(testimonial_placements.get('homepage-demo', [])) }}
 
 {#================= 4. PRICING MATRIX =================#}
 <section class="py-5" id="pricing">
@@ -402,6 +430,7 @@
     </p>
   </div>
 </section>
+{{ assigned_testimonial_cards(testimonial_placements.get('homepage-pricing', [])) }}
 
 {#================= 6. FAQ =================#}
 <section class="py-5 bg-white" id="faq">
@@ -436,6 +465,7 @@
     </div>
   </div>
 </section>
+{{ assigned_testimonial_cards(testimonial_placements.get('homepage-faq', [])) }}
 
 {#================= 7. FOOTER CTA BANNER =================#}
 <section class="py-5">
@@ -451,6 +481,7 @@
     </div>
   </div>
 </section>
+{{ assigned_testimonial_cards(testimonial_placements.get('homepage-final-cta', [])) }}
 {% endblock %}
 
 {% block scripts %}

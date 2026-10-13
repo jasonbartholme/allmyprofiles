@@ -35,7 +35,8 @@ config.py               # Development / Production / Testing configs
 models.py               # User, Link, LinkSource, LinkCategory, Setting,
                         # Activity, Message, MessageRead, LinkCheckResult,
                         # ContactMessage, AbuseReport, ReplyMacro, SavedView,
-                        # TriageRule
+                        # TriageRule, Testimonial, TestimonialReply,
+                        # ContentSection
 uploads_util.py         # image validation / re-encoding / storage helpers
 create_admin.py         # CLI: create or promote a site-admin account
 check_links.py          # cron script: broken-link checker + inbox notifs
@@ -45,6 +46,16 @@ tests/                  # standalone smoke tests for public routes, billing,
 uploads/                # ⚠ user-uploaded images — git-ignored, back this up!
 instance/, *.db         # dev SQLite database — git-ignored
 ```
+
+## Testimonial placements
+
+Admins can assign a testimonial to one or more active site content sections
+from its edit page. **Admin → Content Sections** shows the live count of
+assigned testimonials that are published, complete, and eligible to render.
+Homepage placements include the testimonials, features, demo, pricing, FAQ,
+and final call-to-action sections. The migration preserves testimonials
+already eligible for the home page by assigning them to
+`homepage-testimonials`.
 
 ## Quick start (development — SQLite)
 
