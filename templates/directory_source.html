@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 
 {% block title %}{{ source.name }} Profiles · Social Networks · {{ site_name }}{% endblock %}
+{% block breadcrumb_parents %}
+        <li aria-hidden="true">\</li>
+        <li><a href="{{ url_for('directory') }}">Social Networks</a></li>
+        <li aria-hidden="true">\</li>
+{% endblock %}
+{% block breadcrumb_title %}{{ source.name }} Profiles on {{ site_name }}{% endblock %}
 
 {% block description %}Browse {{ total_members }} public {{ source.name }} profiles from the {{ site_name }} community — visit a member's network profile or their AMP link-in-bio page.{% endblock %}
 
@@ -45,12 +51,6 @@
 {% block content %}
 <div class="py-5" style="background-color: {{ card.bg }}; border-bottom: 1px solid {{ card.border }};">
   <div class="container">
-    <nav aria-label="breadcrumb">
-      <ol class="breadcrumb small mb-3">
-        <li class="breadcrumb-item"><a href="{{ url_for('directory') }}" class="text-decoration-none" style="color: {{ text }};">Social Networks</a></li>
-        <li class="breadcrumb-item active" aria-current="page" style="color: {{ text }};">{{ source.name }}</li>
-      </ol>
-    </nav>
     <div class="d-flex align-items-center gap-3">
       {% if source.custom_icon_path %}
         <img src="/uploads/{{ source.custom_icon_path }}" alt=""

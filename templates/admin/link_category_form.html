@@ -1,5 +1,11 @@
 {% extends 'base.html' %}
 {% block title %}{{ 'Edit' if cat else 'New' }} Link Category — All My Profiles{% endblock %}
+{% block breadcrumb_parents %}
+        <li aria-hidden="true">\</li>
+        <li><a href="{{ url_for('admin_link_categories') }}">Link Categories</a></li>
+        <li aria-hidden="true">\</li>
+{% endblock %}
+{% block breadcrumb_title %}{{ 'Edit “' ~ cat.name ~ '”' if cat else 'New link category' }}{% endblock %}
 
 {% block content %}
 {% set form = form or {} %}
@@ -22,12 +28,6 @@
 {% endif %}
 
 <div class="container py-4" style="max-width: 760px;">
-  <nav aria-label="breadcrumb">
-    <ol class="breadcrumb small mb-2">
-      <li class="breadcrumb-item"><a href="{{ url_for('admin_link_categories') }}">Link Categories</a></li>
-      <li class="breadcrumb-item active">{{ 'Edit category' if cat else 'New category' }}</li>
-    </ol>
-  </nav>
   <h2 class="fw-bold mb-1">
     {% if cat %}<i class="bi bi-pencil-square text-primary me-2"></i>Edit “{{ cat.name }}”{% else %}
     <i class="bi bi-tag text-primary me-2"></i>New link category{% endif %}

@@ -82,6 +82,14 @@
     .sev-warning { border-left-color: #ffc107 !important; }
     .sev-success { border-left-color: #198754 !important; }
     .msg-body { white-space: pre-wrap; }
+    .site-breadcrumb a { color: inherit; text-decoration: none; }
+    .site-breadcrumb a:hover { text-decoration: underline; }
+    .site-breadcrumb {
+      width: fit-content;
+      padding: .5rem .75rem;
+      border-radius: .5rem;
+      background-color: rgba(255, 255, 255, .92);
+    }
   </style>
   {% block head %}{% endblock %}
 </head>
@@ -158,6 +166,13 @@
         </div>
       {% endif %}
     {% endwith %}
+    <nav class="container pt-3" aria-label="Breadcrumb">
+      <ol class="site-breadcrumb list-unstyled d-flex flex-wrap align-items-center gap-2 mb-0 small text-muted">
+        <li><a href="{{ url_for('home') }}">Home</a></li>
+        {% block breadcrumb_parents %}<li aria-hidden="true">\</li>{% endblock %}
+        <li aria-current="page">{% block breadcrumb_title %}{{ self.title() | striptags | replace(' — AllMyProfiles', '') | replace(' — All My Profiles', '') | replace(' — Admin', '') }}{% endblock %}</li>
+      </ol>
+    </nav>
     {% block content %}{% endblock %}
   </main>
 
@@ -170,12 +185,12 @@
           </span>
           <p class="small text-muted mt-2 mb-0">{{ site_tagline }} One memorable link for every profile, page, and platform you own.</p>
           <div class="mt-3 fs-5 d-flex gap-3">
-            <a href="https://x.com/allmyprofiles" class="text-muted" aria-label="X / Twitter" rel="noopener" target="_blank"><i class="bi bi-twitter-x"></i></a>
-            <a href="https://instagram.com/allmyprofiles" class="text-muted" aria-label="Instagram" rel="noopener" target="_blank"><i class="bi bi-instagram"></i></a>
-            <a href="https://linkedin.com/company/allmyprofiles" class="text-muted" aria-label="LinkedIn" rel="noopener" target="_blank"><i class="bi bi-linkedin"></i></a>
-            <a href="https://github.com/allmyprofiles" class="text-muted" aria-label="GitHub" rel="noopener" target="_blank"><i class="bi bi-github"></i></a>
-            <a href="https://youtube.com/@allmyprofiles" class="text-muted" aria-label="YouTube" rel="noopener" target="_blank"><i class="bi bi-youtube"></i></a>
-            <a href="mailto:support@allmyprofiles.io" class="text-muted" aria-label="Email"><i class="bi bi-envelope-fill"></i></a>
+            <a href="https://x.com/allmyprofiles" class="text-muted" aria-label="X / Twitter" alt="X / Twitter" rel="noopener" target="_blank"><i class="bi bi-twitter-x"></i></a>
+            <a href="https://instagram.com/allmyprofiles" class="text-muted" aria-label="Instagram" alt="Instagram" rel="noopener" target="_blank"><i class="bi bi-instagram"></i></a>
+            <a href="https://linkedin.com/company/allmyprofiles" class="text-muted" aria-label="LinkedIn" alt="LinkedIn" rel="noopener" target="_blank"><i class="bi bi-linkedin"></i></a>
+            <a href="https://github.com/allmyprofiles" class="text-muted" aria-label="GitHub" alt="GitHub" rel="noopener" target="_blank"><i class="bi bi-github"></i></a>
+            <a href="https://youtube.com/@allmyprofiles" class="text-muted" aria-label="YouTube" alt="YouTube" rel="noopener" target="_blank"><i class="bi bi-youtube"></i></a>
+            <a href="mailto:support@allmyprofiles.com?subject=Support%20Request-Home%Page" class="text-muted" aria-label="Email" alt="Email"><i class="bi bi-envelope-fill"></i></a>
           </div>
         </div>
         <div class="col-6 col-lg-2 offset-lg-1">

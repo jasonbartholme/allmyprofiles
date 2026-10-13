@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Page not found — AllMyProfiles{% endblock %}
+{% block breadcrumb_title %}{{ message | default("We couldn't find that page.") }}{% endblock %}
 {% block content %}
 <div class="container py-5 text-center">
   <div class="display-1 fw-bold text-primary">404</div>

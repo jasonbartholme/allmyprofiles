@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}{{ user.display_name }} (@{{ user.username }}) — AllMyProfiles{% endblock %}
+{% block breadcrumb_title %}{{ user.display_name }}{% endblock %}
 {% block description %}{{ user.headline or (user.display_name ~ ' — all my profiles in one place.') }}{% endblock %}
 
 {% block head %}

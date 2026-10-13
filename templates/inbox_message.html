@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}{{ message.subject }} — Inbox — AllMyProfiles{% endblock %}
+{% block breadcrumb_title %}{{ message.subject }}{% endblock %}
 
 {% block content %}
 <div class="container py-4" style="max-width: 760px">

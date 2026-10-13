@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% import 'admin/_nav.html' as dash %}
 {% block title %}{{ 'Edit' if src else 'New' }} Link Source — Admin{% endblock %}
+{% block breadcrumb_title %}{{ 'Edit link source' if src else 'New link source' }}{% endblock %}
 
 {% macro field(name, label, value='', type='text', help='', maxlength=300, required=false) %}
 <div class="col-12">
