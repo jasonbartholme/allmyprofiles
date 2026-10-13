@@ -12,7 +12,7 @@ _tmpdb.close()
 os.environ['DATABASE_URL'] = 'sqlite:///' + _tmpdb.name
 
 from app import create_app            # noqa: E402
-from models import db, User, Link, Setting  # noqa: E402
+from models import db, User, Link, Setting, ContentSection, Faq  # noqa: E402
 
 app = create_app('testing')
 passed = failed = 0
@@ -31,6 +31,8 @@ def check(name, cond):
 with app.app_context():
     db.create_all()
     Setting.seed_defaults()
+    ContentSection.seed_defaults()
+    Faq.seed_defaults()
 
     # Seed data: one paid user w/ avatar url + links, one free user w/ links
     u1 = User(username='paidstar', email='p@x.io', display_name='Paid Star',

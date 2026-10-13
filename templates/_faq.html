@@ -1,0 +1,30 @@
+{# Shared FAQ rendering. Usage:
+   {% from '_faq.html' import faq_accordion, faq_jsonld %}
+   {{ faq_accordion(faqs_for_section('some-slug'), 'someId') }}
+   {{ faq_jsonld(faqs_for_section('some-slug')) }} #}
+{% macro faq_accordion(faqs, accordion_id='faqAccordion') %}
+<div class="accordion" id="{{ accordion_id }}">
+  {% for f in faqs %}
+  <div class="accordion-item" id="faq-{{ f.id }}">
+    <h3 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+              data-bs-target="#{{ accordion_id }}-{{ f.id }}" aria-expanded="false"
+              aria-controls="{{ accordion_id }}-{{ f.id }}">{{ f.question }}</button>
+    </h3>
+    <div id="{{ accordion_id }}-{{ f.id }}" class="accordion-collapse collapse"
+         data-bs-parent="#{{ accordion_id }}">
+      <div class="accordion-body text-muted">
+        {% for para in f.rendered_answer().split('\n\n') if para.strip() %}
+        <p class="{{ 'mb-0' if loop.last else 'mb-2' }}">{{ para.strip() }}</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro faq_jsonld(faqs) %}
+{% set data = faq_jsonld_data(faqs) %}
+{% if data %}<script type="application/ld+json">{{ data|tojson }}</script>{% endif %}
+{% endmacro %}

@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}Admin · FAQ Categories — All My Profiles{% endblock %}
+{% block breadcrumb_title %}Admin · FAQ Categories{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h2 fw-bold mb-0"><i class="bi bi-bookmarks text-primary me-2"></i>Admin · FAQ Categories</h1>
+    <a href="{{ url_for('admin_faq_category_new') }}" class="btn btn-primary rounded-pill px-4">
+      <i class="bi bi-plus-lg me-1"></i>New category</a>
+  </div>
+  {{ dash.nav('faq-categories') }}
+  <p class="text-muted">Categories group FAQs on the <a href="{{ url_for('faq_page') }}">FAQ page</a>.
+    Deleting a category keeps its FAQs (they become uncategorized: {{ uncategorized }} currently).</p>
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead><tr><th style="width:70px">Order</th><th>Name</th><th>Description</th><th>FAQs</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+        <tbody>
+        {% for c in categories %}
+          <tr>
+            <td>{{ c.sort_order }}</td>
+            <td class="fw-semibold">{{ c.name }}<br><small class="text-muted">/faq#{{ c.slug }}</small></td>
+            <td><small class="text-muted">{{ c.description or '—' }}</small></td>
+            <td><span class="badge rounded-pill text-bg-secondary">{{ c.faqs|length }}</span></td>
+            <td>{% if c.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Hidden</span>{% endif %}</td>
+            <td class="text-end text-nowrap">
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_faq_category_edit', cat_id=c.id) }}">Edit</a>
+              <form method="post" action="{{ url_for('admin_faq_category_delete', cat_id=c.id) }}" class="d-inline"
+                    onsubmit="return confirm('Delete this category? Its FAQs will become uncategorized.');">
+                <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="text-center text-muted py-4">No categories yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

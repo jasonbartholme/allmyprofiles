@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% set v = form if form else (cat or {}) %}
+{% block title %}Admin · {{ 'Edit' if cat else 'New' }} FAQ Category — All My Profiles{% endblock %}
+{% block breadcrumb_parents %}
+<li class="breadcrumb-item"><a href="{{ url_for('home') }}">Home</a></li>
+<li class="breadcrumb-item"><a href="{{ url_for('admin_faq_categories') }}">Admin · FAQ Categories</a></li>
+{% endblock %}
+{% block breadcrumb_title %}{{ 'Edit' if cat else 'New' }} FAQ category{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width: 720px;">
+  <h1 class="h2 fw-bold mb-3"><i class="bi bi-bookmarks text-primary me-2"></i>{{ 'Edit' if cat else 'New' }} FAQ category</h1>
+  {{ dash.nav('faq-categories') }}
+  <form method="post" class="card card-body">
+    <div class="mb-3">
+      <label class="form-label" for="name">Name</label>
+      <input class="form-control" id="name" name="name" maxlength="80" required value="{{ v.name or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="description">Description</label>
+      <input class="form-control" id="description" name="description" maxlength="250" value="{{ v.description or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="sort_order">Sort order</label>
+      <input type="number" class="form-control" id="sort_order" name="sort_order" value="{{ v.sort_order or 0 }}">
+    </div>
+    <div class="form-check form-switch mb-3">
+      <input class="form-check-input" type="checkbox" id="is_active" name="is_active" {{ 'checked' if v.is_active }}>
+      <label class="form-check-label" for="is_active">Active (hidden categories hide their FAQs from public pages)</label>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-primary rounded-pill px-4" type="submit">Save</button>
+      <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('admin_faq_categories') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

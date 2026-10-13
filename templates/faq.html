@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% from '_faq.html' import faq_accordion, faq_jsonld %}
+{% block title %}Frequently Asked Questions — AllMyProfiles{% endblock %}
+{% block breadcrumb_title %}Frequently Asked Questions{% endblock %}
+{% block head %}
+{% set all_faqs = [] %}
+{% for cat, items in groups %}{% for f in items %}{% set _ = all_faqs.append(f) %}{% endfor %}{% endfor %}
+{{ faq_jsonld(all_faqs) }}
+{% endblock %}
+
+{% block content %}
+<div class="container py-5" style="max-width: 820px;">
+  <h1 class="fw-bold mb-2">Frequently Asked Questions</h1>
+  <p class="text-muted mb-4">Answers to the most common questions about AllMyProfiles.</p>
+
+  {% if not groups %}
+  <p class="text-muted">No questions have been published yet. Please check back soon or
+    <a href="{{ url_for('contact') }}">contact us</a>.</p>
+  {% else %}
+  {% if groups|length > 1 %}
+  <nav class="mb-4 d-flex flex-wrap gap-2" aria-label="FAQ categories">
+    {% for cat, items in groups %}
+    <a class="btn btn-sm btn-outline-primary rounded-pill"
+       href="#{{ cat.slug if cat else 'general' }}">{{ cat.name if cat else 'General' }}</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+
+  {% for cat, items in groups %}
+  <section class="mb-5" id="{{ cat.slug if cat else 'general' }}">
+    <h2 class="h4 fw-bold mb-1">{{ cat.name if cat else 'General' }}</h2>
+    {% if cat and cat.description %}<p class="text-muted small mb-3">{{ cat.description }}</p>{% endif %}
+    {{ faq_accordion(items, 'faqCat' ~ (cat.id if cat else 0)) }}
+  </section>
+  {% endfor %}
+  {% endif %}
+
+  <p class="text-muted">Still have a question? <a href="{{ url_for('contact') }}">Contact us</a>.</p>
+</div>
+{% endblock %}

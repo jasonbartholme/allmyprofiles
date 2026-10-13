@@ -434,38 +434,18 @@
 {{ assigned_testimonial_cards(testimonial_placements.get('homepage-pricing', [])) }}
 
 {#================= 6. FAQ =================#}
+{% from '_faq.html' import faq_accordion, faq_jsonld %}
+{% set home_faqs = faqs_for_section('homepage-faq') %}
+{% if home_faqs %}
 <section class="py-5 bg-white" id="faq">
   <div class="container" style="max-width: 820px;">
     <h2 class="fw-bold text-center mb-4">Frequently asked questions</h2>
-    <div class="accordion" id="faqAccordion">
-      {% set faqs = [
-        ('Can I use my own domain name?',
-         'Yes &mdash; custom domains are available on the Custom plan. Point your domain&rsquo;s DNS at us and we&rsquo;ll serve your profile page with SSL automatically. On lower plans you get a clean canonical URL like <code>/u/yourname</code>.'),
-        ('How do I add my Google Analytics or Meta tracking pixel?',
-         'On the Full and Custom plans, open the Dashboard&rarr;Integrations section, paste your GA4 Measurement ID, Google Tag Manager container, or Meta Pixel ID, and save. Pixels load only on your public profile pages and never track logged-in editing sessions.'),
-        ('Is there a limit on how many links I can add on paid tiers?',
-         'The Free plan includes ' ~ free_max ~ ' active links and Expanded includes 10. The Full and Custom plans are unlimited &mdash; publish as many links, embeds, and sections as you like. Hidden (inactive) links never count against your limit.'),
-        ('How does the platform help my profile show up in Google search results?',
-         'Every public profile ships with semantic HTML, Open Graph meta tags, and JSON-LD schema.org Person markup generated from your display name, headline, bio, and links. That means richer search snippets &mdash; and AI assistants like ChatGPT and Perplexity can accurately cite who you are and where you publish.'),
-        ('What happens if one of my links breaks?',
-         'Our automated link checker visits your links on a schedule. If a destination returns a 404 or errors out, you receive a heads-up in your inbox (throttled so you never get spammed about the same issue) so you can fix or hide it fast.'),
-      ] %}
-      {% for q, a in faqs %}
-      <div class="accordion-item">
-        <h3 class="accordion-header">
-          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
-                  data-bs-target="#faq{{ loop.index }}">
-            {{ q }}
-          </button>
-        </h3>
-        <div id="faq{{ loop.index }}" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
-          <div class="accordion-body text-muted">{{ a|safe }}</div>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
+    {{ faq_accordion(home_faqs, 'faqAccordion') }}
+    <p class="text-center mt-4 mb-0"><a href="{{ url_for('faq_page') }}">See all FAQs</a></p>
   </div>
 </section>
+{{ faq_jsonld(home_faqs) }}
+{% endif %}
 {{ assigned_testimonial_cards(testimonial_placements.get('homepage-faq', [])) }}
 
 {#================= 7. FOOTER CTA BANNER =================#}

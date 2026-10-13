@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}Admin · FAQs — All My Profiles{% endblock %}
+{% block breadcrumb_title %}Admin · FAQs{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h2 fw-bold mb-0"><i class="bi bi-question-circle text-primary me-2"></i>Admin · FAQs</h1>
+    <a href="{{ url_for('admin_faq_new') }}" class="btn btn-primary rounded-pill px-4">
+      <i class="bi bi-plus-lg me-1"></i>New FAQ</a>
+  </div>
+  {{ dash.nav('faqs') }}
+
+  <p class="text-muted">
+    {{ total }} FAQ{{ '' if total == 1 else 's' }}, {{ on_display }} publicly visible on
+    <a href="{{ url_for('faq_page') }}" target="_blank" rel="noopener">/faq</a>.
+    Assign an FAQ to a <a href="{{ url_for('admin_content_sections') }}">content section</a>
+    (e.g. <code>homepage-faq</code>) to show it there. Visible FAQs are marked up with
+    schema.org <code>FAQPage</code> JSON-LD.
+  </p>
+
+  <form method="get" class="row g-2 mb-3">
+    <div class="col-sm-4">
+      <select name="category" class="form-select" aria-label="Category" onchange="this.form.submit()">
+        <option value="">All categories</option>
+        <option value="none" {{ 'selected' if cat == 'none' }}>Uncategorized</option>
+        {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if cat == c.id|string }}>{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-4">
+      <select name="section" class="form-select" aria-label="Section" onchange="this.form.submit()">
+        <option value="">All sections</option>
+        {% for s in sections %}<option value="{{ s.id }}" {{ 'selected' if section == s.id|string }}>{{ s.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-sm-4">
+      <select name="status" class="form-select" aria-label="Status" onchange="this.form.submit()">
+        <option value="">Any status</option>
+        <option value="published" {{ 'selected' if status == 'published' }}>Published</option>
+        <option value="draft" {{ 'selected' if status == 'draft' }}>Draft</option>
+      </select>
+    </div>
+  </form>
+
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead><tr>
+          <th style="width:70px">Order</th><th>Question</th><th>Category</th>
+          <th>Sections</th><th>Status</th><th class="text-end">Actions</th>
+        </tr></thead>
+        <tbody>
+        {% for f in faqs %}
+          <tr>
+            <td>{{ f.sort_order }}</td>
+            <td class="fw-semibold">{{ f.question }}</td>
+            <td>{% if f.category %}{{ f.category.name }}{% if not f.category.is_active %} <span class="badge text-bg-secondary">inactive</span>{% endif %}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+            <td>{% for s in f.content_sections %}<span class="badge text-bg-light border">{{ s.name }}</span> {% else %}<span class="text-muted">—</span>{% endfor %}</td>
+            <td>
+              {% if f.is_published %}<span class="badge text-bg-success">Published</span>
+              {% else %}<span class="badge text-bg-secondary">Draft</span>{% endif %}
+            </td>
+            <td class="text-end text-nowrap">
+              <form method="post" action="{{ url_for('admin_faq_toggle', faq_id=f.id) }}" class="d-inline">
+                <button class="btn btn-sm btn-outline-secondary" type="submit">{{ 'Unpublish' if f.is_published else 'Publish' }}</button>
+              </form>
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_faq_edit', faq_id=f.id) }}">Edit</a>
+              <form method="post" action="{{ url_for('admin_faq_delete', faq_id=f.id) }}" class="d-inline"
+                    onsubmit="return confirm('Delete this FAQ?');">
+                <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="text-center text-muted py-4">No FAQs match.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

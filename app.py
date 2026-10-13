@@ -30,6 +30,8 @@ from config import config_by_name
 from models import (db, User, Link, Setting, Activity, Message, MessageRead,
                     LinkCheckResult, LinkSource, LinkCategory,
                     ContactMessage, AbuseReport, Testimonial, ContentSection,
+                    Faq, FaqCategory, FAQ_QUESTION_MAX, FAQ_ANSWER_MAX,
+                    FAQ_TOKENS, slugify,
                     ReviewInvitation, ReviewInviteTemplate,
                     ReplyMacro, SavedView, TriageRule,
                     REPORT_REASONS, REPORT_STATUSES, CONTACT_STATUSES,
@@ -58,7 +60,7 @@ RESERVED_USERNAMES = {
     'docs', 'help', 'img', 'inbox', 'js', 'login', 'logout', 'pricing',
     'privacy', 'profile', 'redirect', 'register', 'report', 'settings',
     'static', 'status', 'support', 'terms', 'test', 'uploads', 'u', 'www',
-    'directory', 'networks', 'mature',
+    'directory', 'networks', 'mature', 'faq',
 }
 
 USERNAME_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{2,30}$')
@@ -666,6 +668,7 @@ def create_app(config_name=None):
             LinkSource.seed_defaults()
             LinkCategory.seed_defaults()
             ContentSection.seed_defaults()
+            Faq.seed_defaults()
             # One-time-ish backfill so pre-existing locations get country
             # buckets (idempotent; cheap on dev DBs).
             backfill_country_fields()
@@ -683,6 +686,7 @@ def create_app(config_name=None):
     register_link_category_routes(app)
     register_admin_productivity_routes(app)
     register_testimonial_routes(app)
+    register_faq_routes(app)
     register_error_handlers(app)
     register_template_context(app)
 
@@ -2419,6 +2423,7 @@ def register_routes(app):
 - Home / sign up: {base}/
 - AI grounding page (full facts): {base}/ai-grounding
 - Help center: {base}/help
+- Frequently asked questions: {base}/faq
 - Contact / support: {base}/contact
 - Terms of Service: {base}/terms
 - Privacy Policy: {base}/privacy
@@ -4743,6 +4748,289 @@ def _validate_triage_form(form, rule_id=None):
 
 
 # ==========================================
+# FAQs (public page, section placements, admin CRUD)
+# ==========================================
+
+def register_faq_routes(app):
+    """FAQs with categories.
+
+    Public: ``/faq`` lists every visible FAQ grouped by category and emits
+    schema.org FAQPage JSON-LD. Any template can pull the FAQs placed on a
+    content section with ``faqs_for_section('<slug>')`` (see
+    ``templates/_faq.html``); the home page uses ``homepage-faq``.
+    Admin: full CRUD for FAQs and FAQ categories.
+    """
+    app.jinja_env.globals['faqs_for_section'] = Faq.for_section
+    app.jinja_env.globals['faq_jsonld_data'] = Faq.jsonld
+
+    def _sections():
+        return ContentSection.query.filter_by(is_active=True).order_by(
+            ContentSection.sort_order, ContentSection.name).all()
+
+    def _form_ctx(faq, form, selected):
+        return dict(faq=faq, form=form, sections=_sections(),
+                    categories=FaqCategory.ordered(),
+                    selected_section_ids=selected, tokens=FAQ_TOKENS)
+
+    def _posted_section_ids():
+        return [int(v) for v in request.form.getlist('section_ids')
+                if v.isdigit()]
+
+    def _validate_faq_form(form):
+        errors = []
+        question = (form.get('question') or '').strip()
+        if not question:
+            errors.append('Question is required.')
+        elif len(question) > FAQ_QUESTION_MAX:
+            errors.append(f'Question must be {FAQ_QUESTION_MAX} characters '
+                          f'or fewer.')
+        answer = (form.get('answer') or '').strip()
+        if not answer:
+            errors.append('Answer is required.')
+        elif len(answer) > FAQ_ANSWER_MAX:
+            errors.append(f'Answer must be {FAQ_ANSWER_MAX} characters or '
+                          f'fewer.')
+        category_id = None
+        raw_cat = (form.get('category_id') or '').strip()
+        if raw_cat:
+            if raw_cat.isdigit() and db.session.get(FaqCategory,
+                                                    int(raw_cat)):
+                category_id = int(raw_cat)
+            else:
+                errors.append('Choose a valid category.')
+        try:
+            sort_order = int(form.get('sort_order') or 0)
+        except ValueError:
+            sort_order = 0
+        return errors, {'question': question, 'answer': answer,
+                        'category_id': category_id,
+                        'sort_order': sort_order,
+                        'is_published': bool(form.get('is_published'))}
+
+    def _validate_category_form(form, cat_id=None):
+        errors = []
+        name = (form.get('name') or '').strip()
+        slug = slugify(name)
+        if not name:
+            errors.append('Name is required.')
+        elif len(name) > 80:
+            errors.append('Name must be 80 characters or fewer.')
+        elif not slug:
+            errors.append('Name must contain letters or numbers.')
+        else:
+            clash = FaqCategory.query.filter(db.or_(
+                func.lower(FaqCategory.name) == name.lower(),
+                FaqCategory.slug == slug))
+            if cat_id is not None:
+                clash = clash.filter(FaqCategory.id != cat_id)
+            if clash.first() is not None:
+                errors.append(f'A category named "{name}" already exists.')
+        description = (form.get('description') or '').strip()
+        if len(description) > 250:
+            errors.append('Description must be 250 characters or fewer.')
+        try:
+            sort_order = int(form.get('sort_order') or 0)
+        except ValueError:
+            sort_order = 0
+        return errors, {'name': name, 'slug': slug,
+                        'description': description or None,
+                        'sort_order': sort_order,
+                        'is_active': bool(form.get('is_active'))}
+
+    # ---------------------------- public ---------------------------------
+    @app.route('/faq')
+    def faq_page():
+        groups = Faq.grouped_for_page()
+        all_faqs = [f for _, items in groups for f in items]
+        return render_template('faq.html', groups=groups,
+                               jsonld=Faq.jsonld(all_faqs))
+
+    # ------------------------- admin: FAQs -------------------------------
+    @app.route('/admin/faqs')
+    @admin_required
+    def admin_faqs():
+        q = Faq.query
+        cat = request.args.get('category', '')
+        status = request.args.get('status', '')
+        section = request.args.get('section', '')
+        if cat == 'none':
+            q = q.filter(Faq.category_id.is_(None))
+        elif cat.isdigit():
+            q = q.filter(Faq.category_id == int(cat))
+        if status == 'published':
+            q = q.filter(Faq.is_published.is_(True))
+        elif status == 'draft':
+            q = q.filter(Faq.is_published.is_(False))
+        if section.isdigit():
+            q = q.filter(Faq.content_sections.any(
+                ContentSection.id == int(section)))
+        faqs = q.order_by(Faq.sort_order, Faq.id).all()
+        return render_template('admin/faqs.html', faqs=faqs,
+                               categories=FaqCategory.ordered(),
+                               sections=_sections(), cat=cat, status=status,
+                               section=section,
+                               total=Faq.query.count(),
+                               on_display=len(Faq.public_query().all()))
+
+    @app.route('/admin/faqs/new', methods=['GET', 'POST'])
+    @admin_required
+    def admin_faq_new():
+        if request.method == 'POST':
+            errors, data = _validate_faq_form(request.form)
+            if errors:
+                for e in errors:
+                    flash(e, 'danger')
+                return render_template('admin/faq_form.html', **_form_ctx(
+                    None, request.form, _posted_section_ids()))
+            faq = Faq(**data)
+            faq.content_sections = ContentSection.query.filter(
+                ContentSection.id.in_(_posted_section_ids()),
+                ContentSection.is_active.is_(True)).all()
+            db.session.add(faq)
+            Activity.record('faq_created', actor=_real_admin(),
+                            detail=f'created FAQ "{faq.question[:80]}"')
+            db.session.commit()
+            flash('FAQ created.', 'success')
+            return redirect(url_for('admin_faqs'))
+        next_order = (db.session.query(func.max(Faq.sort_order)).scalar()
+                      or 0) + 1
+        return render_template('admin/faq_form.html', **_form_ctx(
+            None, {'sort_order': next_order, 'is_published': 'on'}, []))
+
+    @app.route('/admin/faqs/<int:faq_id>/edit', methods=['GET', 'POST'])
+    @admin_required
+    def admin_faq_edit(faq_id):
+        faq = db.session.get(Faq, faq_id)
+        if faq is None:
+            abort(404)
+        if request.method == 'POST':
+            errors, data = _validate_faq_form(request.form)
+            if errors:
+                for e in errors:
+                    flash(e, 'danger')
+                return render_template('admin/faq_form.html', **_form_ctx(
+                    faq, request.form, _posted_section_ids()))
+            for field, value in data.items():
+                setattr(faq, field, value)
+            faq.content_sections = ContentSection.query.filter(
+                ContentSection.id.in_(_posted_section_ids()),
+                ContentSection.is_active.is_(True)).all()
+            faq.updated_at = datetime.now()
+            Activity.record('faq_updated', actor=_real_admin(),
+                            detail=f'edited FAQ #{faq.id}')
+            db.session.commit()
+            flash('FAQ updated.', 'success')
+            return redirect(url_for('admin_faqs'))
+        return render_template('admin/faq_form.html', **_form_ctx(
+            faq, None, [s.id for s in faq.content_sections]))
+
+    @app.route('/admin/faqs/<int:faq_id>/delete', methods=['POST'])
+    @admin_required
+    def admin_faq_delete(faq_id):
+        faq = db.session.get(Faq, faq_id)
+        if faq is None:
+            abort(404)
+        db.session.delete(faq)
+        Activity.record('faq_deleted', actor=_real_admin(),
+                        detail=f'deleted FAQ #{faq_id}')
+        db.session.commit()
+        flash('FAQ deleted.', 'info')
+        return redirect(url_for('admin_faqs'))
+
+    @app.route('/admin/faqs/<int:faq_id>/toggle', methods=['POST'])
+    @admin_required
+    def admin_faq_toggle(faq_id):
+        faq = db.session.get(Faq, faq_id)
+        if faq is None:
+            abort(404)
+        faq.is_published = not faq.is_published
+        faq.updated_at = datetime.now()
+        Activity.record('faq_updated', actor=_real_admin(),
+                        detail=f'{"published" if faq.is_published else "unpublished"} '
+                               f'FAQ #{faq.id}')
+        db.session.commit()
+        flash('FAQ published.' if faq.is_published else 'FAQ unpublished.',
+              'success')
+        return redirect(request.referrer or url_for('admin_faqs'))
+
+    # ---------------------- admin: FAQ categories ------------------------
+    @app.route('/admin/faq-categories')
+    @admin_required
+    def admin_faq_categories():
+        return render_template('admin/faq_categories.html',
+                               categories=FaqCategory.ordered(),
+                               uncategorized=Faq.query.filter(
+                                   Faq.category_id.is_(None)).count())
+
+    @app.route('/admin/faq-categories/new', methods=['GET', 'POST'])
+    @admin_required
+    def admin_faq_category_new():
+        if request.method == 'POST':
+            errors, data = _validate_category_form(request.form)
+            if errors:
+                for e in errors:
+                    flash(e, 'danger')
+                return render_template('admin/faq_category_form.html',
+                                       cat=None, form=request.form)
+            cat = FaqCategory(**data)
+            db.session.add(cat)
+            Activity.record('faq_category_created', actor=_real_admin(),
+                            detail=f'created FAQ category "{cat.name}"')
+            db.session.commit()
+            flash(f'Category "{cat.name}" created.', 'success')
+            return redirect(url_for('admin_faq_categories'))
+        next_order = (db.session.query(func.max(FaqCategory.sort_order))
+                      .scalar() or 0) + 1
+        return render_template('admin/faq_category_form.html', cat=None,
+                               form={'sort_order': next_order,
+                                     'is_active': 'on'})
+
+    @app.route('/admin/faq-categories/<int:cat_id>/edit',
+               methods=['GET', 'POST'])
+    @admin_required
+    def admin_faq_category_edit(cat_id):
+        cat = db.session.get(FaqCategory, cat_id)
+        if cat is None:
+            abort(404)
+        if request.method == 'POST':
+            errors, data = _validate_category_form(request.form,
+                                                   cat_id=cat_id)
+            if errors:
+                for e in errors:
+                    flash(e, 'danger')
+                return render_template('admin/faq_category_form.html',
+                                       cat=cat, form=request.form)
+            for field, value in data.items():
+                setattr(cat, field, value)
+            Activity.record('faq_category_updated', actor=_real_admin(),
+                            detail=f'updated FAQ category "{cat.name}"')
+            db.session.commit()
+            flash(f'Category "{cat.name}" updated.', 'success')
+            return redirect(url_for('admin_faq_categories'))
+        return render_template('admin/faq_category_form.html', cat=cat,
+                               form=None)
+
+    @app.route('/admin/faq-categories/<int:cat_id>/delete',
+               methods=['POST'])
+    @admin_required
+    def admin_faq_category_delete(cat_id):
+        cat = db.session.get(FaqCategory, cat_id)
+        if cat is None:
+            abort(404)
+        name = cat.name
+        # FAQs are kept and become uncategorized.
+        Faq.query.filter_by(category_id=cat.id).update(
+            {'category_id': None}, synchronize_session='fetch')
+        db.session.delete(cat)
+        Activity.record('faq_category_deleted', actor=_real_admin(),
+                        detail=f'deleted FAQ category "{name}"')
+        db.session.commit()
+        flash(f'Category "{name}" deleted. Its FAQs are now uncategorized.',
+              'info')
+        return redirect(url_for('admin_faq_categories'))
+
+
+# ==========================================
 # Static Marketing Pages (linked from footer)
 # ==========================================
 
@@ -5020,6 +5308,7 @@ def register_seo_routes(app):
         entries = [
             ('/', 'daily', '1.0'),
             ('/help', 'weekly', '0.6'),
+            ('/faq', 'weekly', '0.7'),
             ('/contact', 'monthly', '0.4'),
             ('/ai-grounding', 'weekly', '0.7'),
             ('/directory', 'daily', '0.9'),
@@ -5136,7 +5425,8 @@ def register_template_context(app):
         # viewer happens to be logged in. Everything behind auth (dashboard,
         # inbox, admin) is noindex,nofollow so bots never see private state.
         PUBLIC_INDEXABLE = {'home', 'public_profile', 'public_profile_alias',
-                            'help_center', 'contact', 'terms', 'privacy',
+                            'help_center', 'faq_page', 'contact', 'terms',
+                            'privacy',
                             'ai_grounding', 'directory', 'directory_source',
                             'countries', 'country_detail'}
         endpoint = request.endpoint

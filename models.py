@@ -1489,8 +1489,242 @@ class ContentSection(db.Model):
         db.session.commit()
         return section
 
+    @property
+    def active_faq_count(self):
+        return len(Faq.for_section(self.slug))
+
     def __repr__(self):
         return f'<ContentSection {self.slug!r}>'
+
+
+# ==========================================
+# FAQs (admin-managed Q&A with categories, content-section placements and
+# schema.org FAQPage markup for search engines / AI crawlers)
+# ==========================================
+
+faq_sections = db.Table(
+    'faq_sections',
+    db.Column('faq_id', db.Integer,
+              db.ForeignKey('faqs.id', ondelete='CASCADE'),
+              primary_key=True),
+    db.Column('content_section_id', db.Integer,
+              db.ForeignKey('content_sections.id', ondelete='CASCADE'),
+              primary_key=True),
+)
+
+FAQ_QUESTION_MAX = 300
+FAQ_ANSWER_MAX = 4000
+
+# Placeholders usable in answer copy; filled from live settings so answers
+# never go stale when an admin changes a limit.
+FAQ_TOKENS = ('{free_max}', '{expanded_max}')
+
+
+def slugify(text):
+    """Lowercase hyphen slug ('Billing & Plans' -> 'billing-plans')."""
+    return re.sub(r'[^a-z0-9]+', '-', (text or '').strip().lower()).strip('-')
+
+
+class FaqCategory(db.Model):
+    """Heading under which FAQs are grouped on the /faq page."""
+    __tablename__ = 'faq_categories'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False, unique=True)
+    slug = db.Column(db.String(100), nullable=False, unique=True, index=True)
+    description = db.Column(db.String(250), nullable=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0,
+                           server_default='0')
+    is_active = db.Column(db.Boolean, nullable=False, default=True,
+                          server_default='1')
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(),
+                           nullable=False)
+
+    faqs = db.relationship('Faq', back_populates='category',
+                           order_by='Faq.sort_order, Faq.id')
+
+    def __repr__(self):
+        return f'<FaqCategory {self.slug!r}>'
+
+    @classmethod
+    def ordered(cls, active_only=False):
+        q = cls.query
+        if active_only:
+            q = q.filter_by(is_active=True)
+        return q.order_by(cls.sort_order, cls.name).all()
+
+    @property
+    def published_faqs(self):
+        return [f for f in self.faqs if f.is_published]
+
+
+class Faq(db.Model):
+    """One question/answer pair.
+
+    Visibility: ``is_published`` plus (for /faq) an active category. Sections
+    placements (``content_sections``) decide where else the FAQ is rendered;
+    assigning it to the ``homepage-faq`` section is what puts it on the home
+    page accordion.
+    """
+    __tablename__ = 'faqs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    question = db.Column(db.String(FAQ_QUESTION_MAX), nullable=False)
+    answer = db.Column(db.Text, nullable=False)
+    category_id = db.Column(db.Integer,
+                            db.ForeignKey('faq_categories.id',
+                                          ondelete='SET NULL'),
+                            nullable=True, index=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0,
+                           server_default='0')
+    is_published = db.Column(db.Boolean, nullable=False, default=True,
+                             server_default='1')
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(),
+                           nullable=False)
+    updated_at = db.Column(db.DateTime, nullable=True)
+
+    category = db.relationship('FaqCategory', back_populates='faqs')
+    content_sections = db.relationship(
+        'ContentSection', secondary=faq_sections,
+        backref=db.backref('faqs', lazy='select'))
+
+    def __repr__(self):
+        return f'<Faq {self.id} {self.question[:30]!r}>'
+
+    @property
+    def is_visible(self):
+        """Published and not hidden by an inactive category."""
+        return bool(self.is_published and
+                    (self.category is None or self.category.is_active))
+
+    @classmethod
+    def public_query(cls):
+        """Published FAQs whose category (if any) is active."""
+        return (cls.query.outerjoin(FaqCategory)
+                .filter(cls.is_published.is_(True),
+                        db.or_(cls.category_id.is_(None),
+                               FaqCategory.is_active.is_(True))))
+
+    @classmethod
+    def for_section(cls, slug):
+        """Visible FAQs placed on the content section ``slug``, in order."""
+        return (cls.public_query()
+                .join(faq_sections, faq_sections.c.faq_id == cls.id)
+                .join(ContentSection,
+                      ContentSection.id == faq_sections.c.content_section_id)
+                .filter(ContentSection.slug == slug,
+                        ContentSection.is_active.is_(True))
+                .order_by(cls.sort_order, cls.id).all())
+
+    @classmethod
+    def grouped_for_page(cls):
+        """[(category_or_None, [faqs])] for the public /faq page."""
+        faqs = cls.public_query().order_by(cls.sort_order, cls.id).all()
+        buckets = {}
+        for faq in faqs:
+            buckets.setdefault(faq.category_id, []).append(faq)
+        groups = [(c, buckets[c.id])
+                  for c in FaqCategory.ordered(active_only=True)
+                  if c.id in buckets]
+        if None in buckets:
+            groups.append((None, buckets[None]))
+        return groups
+
+    def rendered_answer(self):
+        """Answer text with live-setting tokens filled in."""
+        text = self.answer or ''
+        if '{' in text:
+            text = (text
+                    .replace('{free_max}',
+                             str(Setting.get_int('free_tier_max_links', 3)))
+                    .replace('{expanded_max}',
+                             str(Setting.get_int('expanded_tier_max_links',
+                                                 10))))
+        return text
+
+    @staticmethod
+    def jsonld(faqs):
+        """schema.org FAQPage for exactly the FAQs rendered on the page."""
+        if not faqs:
+            return None
+        return {
+            '@context': 'https://schema.org',
+            '@type': 'FAQPage',
+            'mainEntity': [{
+                '@type': 'Question',
+                'name': f.question,
+                'acceptedAnswer': {'@type': 'Answer',
+                                   'text': f.rendered_answer()},
+            } for f in faqs],
+        }
+
+    @classmethod
+    def seed_defaults(cls):
+        """Starter FAQs, shown on the home page FAQ section (idempotent:
+        only runs while the faqs table is empty)."""
+        if cls.query.first() is not None:
+            return
+        section = ContentSection.query.filter_by(
+            slug='homepage-faq').first()
+        cats = {}
+        for idx, (name, desc) in enumerate(DEFAULT_FAQ_CATEGORIES):
+            cat = FaqCategory.query.filter_by(slug=slugify(name)).first()
+            if cat is None:
+                cat = FaqCategory(name=name, slug=slugify(name),
+                                  description=desc, sort_order=idx)
+                db.session.add(cat)
+            cats[name] = cat
+        db.session.flush()
+        for idx, (cat_name, question, answer) in enumerate(DEFAULT_FAQS):
+            faq = cls(question=question, answer=answer,
+                      category_id=cats[cat_name].id, sort_order=idx)
+            if section is not None:
+                faq.content_sections.append(section)
+            db.session.add(faq)
+        db.session.commit()
+
+
+DEFAULT_FAQ_CATEGORIES = [
+    ('Getting Started', 'Set up your profile and share your link.'),
+    ('Plans & Billing', 'Plans, limits, and custom domains.'),
+    ('Search & AI Visibility',
+     'How profiles are discovered by search engines and AI assistants.'),
+    ('Links & Analytics', 'Managing links, tracking, and link health.'),
+]
+
+DEFAULT_FAQS = [
+    # category, question, answer (plain text; blank line = new paragraph)
+    ('Plans & Billing', 'Can I use my own domain name?',
+     'Yes — custom domains are available on the Custom plan. Point your '
+     'domain\'s DNS at us and we\'ll serve your profile page with SSL '
+     'automatically. On lower plans you get a clean canonical URL like '
+     '/u/yourname.'),
+    ('Links & Analytics',
+     'How do I add my Google Analytics or Meta tracking pixel?',
+     'On the Full and Custom plans, open the Dashboard → Integrations '
+     'section, paste your GA4 Measurement ID, Google Tag Manager '
+     'container, or Meta Pixel ID, and save. Pixels load only on your '
+     'public profile pages and never track logged-in editing sessions.'),
+    ('Plans & Billing',
+     'Is there a limit on how many links I can add on paid tiers?',
+     'The Free plan includes {free_max} active links and Expanded includes '
+     '{expanded_max}. The Full and Custom plans are unlimited — publish as '
+     'many links, embeds, and sections as you like. Hidden (inactive) '
+     'links never count against your limit.'),
+    ('Search & AI Visibility',
+     'How does the platform help my profile show up in Google search '
+     'results?',
+     'Every public profile ships with semantic HTML, Open Graph meta tags, '
+     'and JSON-LD schema.org Person markup generated from your display '
+     'name, headline, bio, and links. That means richer search snippets — '
+     'and AI assistants like ChatGPT and Perplexity can accurately cite '
+     'who you are and where you publish.'),
+    ('Links & Analytics', 'What happens if one of my links breaks?',
+     'Our automated link checker visits your links on a schedule. If a '
+     'destination returns a 404 or errors out, you receive a heads-up in '
+     'your inbox (throttled so you never get spammed about the same '
+     'issue) so you can fix or hide it fast.'),
+]
 
 
 # ==========================================
