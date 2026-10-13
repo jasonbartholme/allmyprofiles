@@ -691,6 +691,7 @@ class LinkSource(db.Model):
     name = db.Column(db.String(80), unique=True, nullable=False)
     domains = db.Column(db.String(300), nullable=True)  # comma-separated
     url = db.Column(db.String(300), nullable=True)      # example/default URL
+    home_url = db.Column(db.String(300), nullable=True)  # site home page
     profile_pattern = db.Column(db.String(300), nullable=True)  # {handle} tmpl
     bg_color = db.Column(db.String(9), default='#ffffff', nullable=False)
     text_color = db.Column(db.String(9), default='#212529', nullable=False)
@@ -888,6 +889,15 @@ class LinkSource(db.Model):
         if changed:
             db.session.commit()
         return changed
+
+    @staticmethod
+    def derive_home_url(example_url):
+        """Home page (scheme://host/) for an example profile URL."""
+        from urllib.parse import urlsplit
+        parts = urlsplit((example_url or '').strip())
+        if parts.scheme in ('http', 'https') and parts.netloc:
+            return f'{parts.scheme}://{parts.netloc}/'
+        return None
 
     @classmethod
     def seed_defaults(cls):
@@ -1317,7 +1327,9 @@ class Testimonial(db.Model):
                               nullable=True)
     # Attribution when the quote arrived through a review invitation.
     invitation_id = db.Column(db.Integer,
-                              db.ForeignKey('review_invitations.id'),
+                              db.ForeignKey('review_invitations.id',
+                                            use_alter=True,
+                                            name='fk_testimonials_invitation_id'),
                               nullable=True, index=True)
 
     author = db.relationship('User', foreign_keys=[user_id])

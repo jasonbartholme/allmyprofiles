@@ -2325,6 +2325,22 @@ def register_routes(app):
         member_ids = _directory_member_ids(include_adult)
         rows = _directory_profile_rows(src, member_ids)
 
+        # Only countries that have at least one profile on this network.
+        country_names = {}
+        for row in rows:
+            code = (row['user'].country_code or '').upper()
+            if code:
+                country_names.setdefault(
+                    code, row['user'].country_name or code)
+        countries = sorted(country_names.items(),
+                           key=lambda kv: (kv[1].casefold(), kv[0]))
+        country = (request.args.get('country') or '').strip().upper()
+        if country not in country_names:
+            country = ''
+        if country:
+            rows = [r for r in rows
+                    if (r['user'].country_code or '').upper() == country]
+
         query = (request.args.get('q') or '').strip()[:100]
         query_key = query.casefold()
         if query_key:
@@ -2376,6 +2392,8 @@ def register_routes(app):
             per_page=per_page,
             query=query,
             sort=sort,
+            countries=countries,
+            country=country,
             include_adult=include_adult,
         )
 
@@ -3385,6 +3403,10 @@ def register_link_source_routes(app):
         if url and not url.startswith(('http://', 'https://')):
             errors.append('Example URL must start with http:// or https://.')
 
+        home_url = (form.get('home_url') or '').strip()
+        if home_url and not home_url.startswith(('http://', 'https://')):
+            errors.append('Home page URL must start with http:// or https://.')
+
         pattern = (form.get('profile_pattern') or '').strip()
         if pattern:
             if '{handle}' not in pattern:
@@ -3424,7 +3446,7 @@ def register_link_source_routes(app):
 
         cleaned = {
             'name': name, 'domains': domains, 'url': url,
-            'profile_pattern': pattern, 'icon_code': icon_code,
+            'home_url': home_url, 'profile_pattern': pattern, 'icon_code': icon_code,
             'category': category, 'cta': cta, 'sort_order': sort_order,
             'description': description,
             'is_active': form.get('is_active') == 'on',
@@ -5262,14 +5284,12 @@ def register_seo_routes(app):
     # ---- Microsoft / Android tile manifest -------------------------------
     @app.route('/browserconfig.xml')
     def browserconfig_xml():
-        fav = url_for('favicon')
+        img = url_for('static', filename='images/web-app-manifest-192x192.png')
         body = f"""<?xml version="1.0" encoding="utf-8"?>
 <browserconfig>
   <msapplication>
     <tile>
-      <square70x70logo src="{fav}?size=70"/>
-      <square150x150logo src="{fav}?size=150"/>
-      <square310x310logo src="{fav}?size=310"/>
+      <square150x150logo src="{img}"/>
       <TileColor>#35306b</TileColor>
     </tile>
   </msapplication>

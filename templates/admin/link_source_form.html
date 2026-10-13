@@ -33,6 +33,9 @@
         {{ field('url', 'Example URL', value=src.url if src else '',
                  help='Placeholder/example shown in the user picker, e.g. https://github.com/yourusername') }}
 
+        {{ field('home_url', 'Home page URL', value=src.home_url if src else '',
+                 help='The network\'s home page, e.g. https://github.com/') }}
+
         {{ field('profile_pattern', 'Profile pattern', value=src.profile_pattern if src else '',
                  help='Template with {handle}, e.g. https://github.com/{handle} — lets users just type their username') }}
 

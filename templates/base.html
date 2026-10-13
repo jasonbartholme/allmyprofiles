@@ -12,16 +12,13 @@
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <link rel="canonical" href="{{ canonical_url }}">
 
-  {# ===== Favicon / device icons (served dynamically by the app) ===== #}
-  <link rel="icon" href="{{ url_for('favicon', size=32) }}" type="image/png" sizes="32x32">
-  <link rel="icon" href="{{ url_for('favicon', size=192) }}" type="image/png" sizes="192x192">
-  <link rel="icon" href="{{ url_for('favicon', size=512) }}" type="image/png" sizes="512x512">
-  <link rel="shortcut icon" href="{{ url_for('favicon') }}" type="image/x-icon">
-  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('favicon', size=180) }}">
-  <link rel="apple-touch-icon" sizes="152x152" href="{{ url_for('favicon', size=152) }}">
-  <link rel="apple-touch-icon" sizes="167x167" href="{{ url_for('favicon', size=167) }}">
-  <link rel="apple-touch-icon" sizes="120x120" href="{{ url_for('favicon', size=120) }}">
-  <link rel="apple-touch-icon" href="{{ url_for('favicon', size=180) }}">
+  {# ===== Favicon / device icons (static files in /static/images) ===== #}
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='images/favicon-96x96.png') }}" sizes="96x96">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/favicon.svg') }}">
+  <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
+  <meta name="apple-mobile-web-app-title" content="AMP">
+  <link rel="manifest" href="{{ url_for('static', filename='images/site.webmanifest') }}">
   <meta name="theme-color" content="#4c8dff">
   <meta name="msapplication-TileColor" content="#35306b">
   <meta name="msapplication-config" content="{{ url_for('browserconfig_xml') }}">
@@ -31,7 +28,7 @@
   <meta property="og:title" content="{% block og_title %}{{ self.title() }}{% endblock %}">
   <meta property="og:description" content="{% block og_description %}{{ self.description() }}{% endblock %}">
   <meta property="og:url" content="{{ canonical_url }}">
-  <meta property="og:image" content="{% block og_image %}{{ site_url }}/apple-touch-icon.png{% endblock %}">
+  <meta property="og:image" content="{% block og_image %}{{ site_url }}{{ url_for('static', filename='images/web-app-manifest-512x512.png') }}{% endblock %}">
   <meta property="og:type" content="{% block og_type %}website{% endblock %}">
   <meta property="og:locale" content="en_US">
   <meta name="twitter:card" content="summary_large_image">
@@ -54,7 +51,7 @@
       "url": "{{ site_url }}/",
       "logo": {
         "@type": "ImageObject",
-        "url": "{{ site_url }}{{ url_for('favicon', size=512) }}",
+        "url": "{{ site_url }}{{ url_for('static', filename='images/web-app-manifest-512x512.png') }}",
         "width": 512,
         "height": 512
       }
@@ -97,7 +94,7 @@
   <nav class="navbar navbar-expand-lg bg-white shadow-sm">
     <div class="container">
       <a class="navbar-brand text-primary" href="{{ url_for('home') }}">
-        <i class="bi bi-link-45deg me-1"></i>AllMyProfiles
+        <img src="{{ url_for('static', filename='images/favicon-96x96.png') }}" alt="" width="28" height="28" class="me-2 align-text-bottom rounded">AllMyProfiles
       </a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
         <span class="navbar-toggler-icon"></span>
@@ -181,7 +178,7 @@
       <div class="row gy-4">
         <div class="col-lg-4">
           <span class="navbar-brand fw-bold text-primary fs-5">
-            <i class="bi bi-link-45deg me-1"></i>AllMyProfiles
+            <img src="{{ url_for('static', filename='images/favicon-96x96.png') }}" alt="" width="24" height="24" class="me-2 align-text-bottom rounded">AllMyProfiles
           </span>
           <p class="small text-muted mt-2 mb-0">{{ site_tagline }} One memorable link for every profile, page, and platform you own.</p>
           <div class="mt-3 fs-5 d-flex gap-3">

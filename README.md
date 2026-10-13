@@ -95,17 +95,15 @@ gunicorn "app:create_app('production')" -w 4 -b 0.0.0.0:8000
 
 Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
 
-> **Schema changes:** development auto-creates new tables via
-> `db.create_all()`, but **production needs explicit migrations**. Recent
-> features added tables — inbox messaging (`messages`, `message_reads`,
-> `link_check_results`), the link-source catalog (`link_sources`,
-> `link_categories`), contact messages, abuse reports, reply macros, saved
-> views, triage rules, plus new columns on `users`/`links` — before
-> deploying, generate and apply the migration:
+> **Schema changes:** all earlier migrations were squashed into one baseline,
+> `0001baseline`, which creates every table and seeds the link categories,
+> link sources, FAQs and content sections. A fresh database only needs
+> `flask db upgrade`. For future model changes, generate and commit a new
+> migration on top of it:
 >
 > ```bash
-> flask db migrate -m "link categories/sources, moderation"   # run once, commit the result
-> flask db upgrade                                # run on each production host
+> flask db migrate -m "describe the change"   # run once, commit the result
+> flask db upgrade                            # run on each production host
 > ```
 
 ## User features

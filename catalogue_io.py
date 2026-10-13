@@ -131,7 +131,7 @@ def _clean_icon(value, default):
 # ---------------------------------------------------------------- export
 
 SOURCE_EXPORT_FIELDS = (
-    'name', 'domains', 'url', 'profile_pattern', 'bg_color', 'text_color',
+    'name', 'domains', 'url', 'home_url', 'profile_pattern', 'bg_color', 'text_color',
     'border_color', 'icon_code', 'is_nofollow', 'cta', 'category',
     'sort_order', 'is_active', 'is_adult', 'description',
 )
@@ -206,6 +206,10 @@ def _normalize_source_entry(entry, idx, errors, seen):
         if url and not url.startswith(('http://', 'https://')):
             raise ValueError('example URL must start with http:// or https://')
         data['url'] = url
+        home_url = _clean_str(entry.get('home_url'), 300)
+        if home_url and not home_url.startswith(('http://', 'https://')):
+            raise ValueError('home_url must start with http:// or https://')
+        data['home_url'] = home_url or LinkSource.derive_home_url(url)
         data['profile_pattern'] = _clean_pattern(entry.get('profile_pattern'))
         data['bg_color'] = _clean_color(entry.get('bg_color'), '#ffffff')
         data['text_color'] = _clean_color(entry.get('text_color'), '#212529')

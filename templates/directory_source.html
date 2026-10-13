@@ -68,6 +68,14 @@
         {% if source.description %}
         <p class="mb-2" style="color: {{ text }}; max-width: 60rem;">{{ source.description }}</p>
         {% endif %}
+        {% if source.home_url %}
+        <p class="mb-2">
+          <a href="{{ source.home_url }}" target="_blank" rel="noopener{% if source.is_nofollow %} nofollow{% endif %}"
+             class="fw-semibold" style="color: {{ text }};">
+            Visit {{ source.name }} <i class="bi bi-box-arrow-up-right ms-1"></i>
+          </a>
+        </p>
+        {% endif %}
         <p class="mb-0 small" style="color: {{ text }}; opacity:.8;">
           {{ total_members }} public member profile{{ '' if total_members == 1 else 's' }}
           on {{ source.name }}{% if source.category %} · {{ source.category }}{% endif %}
@@ -90,7 +98,7 @@
   </section>
   {% endif %}
 
-  {% if total_members or query %}
+  {% if total_members or query or country %}
   <section aria-label="All {{ source.name }} profiles">
     <div class="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-3">
       <h2 class="h5 fw-bold mb-0">
@@ -106,6 +114,17 @@
                value="{{ query }}" maxlength="100"
                placeholder="Name or interest">
       </div>
+      {% if countries %}
+      <div class="col-12 col-sm-6 col-md-auto">
+        <label class="form-label small fw-semibold mb-1" for="directory-country">Country</label>
+        <select class="form-select" id="directory-country" name="country">
+          <option value="">All countries</option>
+          {% for code, cname in countries %}
+          <option value="{{ code }}" {{ 'selected' if code == country }}>{{ cname }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
       <div class="col-12 col-sm-6 col-md-auto">
         <label class="form-label small fw-semibold mb-1" for="directory-sort">Sort</label>
         <select class="form-select" id="directory-sort" name="sort">
@@ -135,25 +154,25 @@
     <nav class="mt-4" aria-label="Directory pages">
       <ul class="pagination pagination-sm justify-content-center">
         <li class="page-item{% if page <= 1 %} disabled{% endif %}">
-          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, page=page - 1) }}" aria-label="Previous page">&larr;</a>
+          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, country=country or None, page=page - 1) }}" aria-label="Previous page">&larr;</a>
         </li>
         {% set start_page = [1, page - 2]|max %}
         {% set end_page = [total_pages, page + 2]|min %}
         {% if start_page > 1 %}
-        <li class="page-item"><a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, page=1) }}">1</a></li>
+        <li class="page-item"><a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, country=country or None, page=1) }}">1</a></li>
         {% if start_page > 2 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
         {% endif %}
         {% for p in range(start_page, end_page + 1) %}
         <li class="page-item{% if p == page %} active{% endif %}">
-          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, page=p) }}">{{ p }}</a>
+          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, country=country or None, page=p) }}">{{ p }}</a>
         </li>
         {% endfor %}
         {% if end_page < total_pages %}
         {% if end_page < total_pages - 1 %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
-        <li class="page-item"><a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, page=total_pages) }}">{{ total_pages }}</a></li>
+        <li class="page-item"><a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, country=country or None, page=total_pages) }}">{{ total_pages }}</a></li>
         {% endif %}
         <li class="page-item{% if page >= total_pages %} disabled{% endif %}">
-          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, page=page + 1) }}" aria-label="Next page">&rarr;</a>
+          <a class="page-link" href="{{ url_for('directory_source', source_name=source_slug(source.name), q=query, sort=sort, country=country or None, page=page + 1) }}" aria-label="Next page">&rarr;</a>
         </li>
       </ul>
     </nav>
@@ -161,7 +180,7 @@
   </section>
   {% endif %}
 
-  {% if not featured and not total_rest and not query %}
+  {% if not featured and not total_rest and not query and not country %}
   <div class="text-center py-5">
     <i class="bi bi-person-lines-fill fs-1 text-muted"></i>
     <h2 class="h4 mt-3">No public profiles yet</h2>
