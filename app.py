@@ -17,6 +17,7 @@ import random
 import re
 import secrets
 from datetime import datetime, timedelta
+from urllib.parse import urlsplit
 
 from flask import (Flask, render_template, request, redirect, url_for, flash,
                    abort, session, send_from_directory, Response)
@@ -4770,6 +4771,139 @@ def register_static_pages(app):
                   'within 2 business days.', 'success')
             return redirect(url_for('contact'))
         return render_template('contact.html')
+
+    @app.route('/suggest', methods=['GET', 'POST'])
+    def suggest():
+        """Collect website/social-network suggestions for admin review."""
+        categories = LinkCategory.names()
+        form_data = {
+            'name': (current_user.display_name or current_user.username)
+                    if current_user.is_authenticated else '',
+            'email': current_user.email if current_user.is_authenticated else '',
+        }
+        if request.method == 'POST':
+            form_data = request.form
+            # Honeypot: appear successful to bots without adding inbox noise.
+            if request.form.get('website'):
+                flash('Thanks for your suggestion.', 'success')
+                return redirect(url_for('suggest'))
+
+            name = (request.form.get('name') or '').strip()
+            email = (request.form.get('email') or '').strip().lower()
+            suggestion_type = (request.form.get('suggestion_type') or '').strip()
+            profile_url = (request.form.get('profile_url') or '').strip()
+            category = (request.form.get('category') or '').strip()
+            description = (request.form.get('description') or '').strip()
+            is_adult = (
+                suggestion_type == 'social_network'
+                and request.form.get('is_adult') == 'on'
+            )
+            errors = []
+
+            if not name or len(name) > 120:
+                errors.append('Enter your name (up to 120 characters).')
+            if not CONTACT_EMAIL_RE.match(email):
+                errors.append('Enter a valid email address.')
+            if suggestion_type not in ('social_network', 'site'):
+                errors.append('Choose a suggestion type.')
+            if not description or len(description) > 3000:
+                errors.append(
+                    'Describe your suggestion (up to 3000 characters).')
+
+            if suggestion_type == 'social_network':
+                try:
+                    parsed_url = urlsplit(profile_url)
+                    valid_url = (
+                        parsed_url.scheme in ('http', 'https')
+                        and bool(parsed_url.hostname)
+                        and not parsed_url.username
+                        and not parsed_url.password
+                        and len(profile_url) <= 500
+                    )
+                except ValueError:
+                    valid_url = False
+                if not valid_url:
+                    errors.append(
+                        'Enter a valid social network profile page URL '
+                        'starting with http:// or https://.')
+                if category not in categories:
+                    errors.append('Choose a category from the list.')
+            elif suggestion_type == 'site':
+                if profile_url:
+                    try:
+                        parsed_url = urlsplit(profile_url)
+                        valid_url = (
+                            parsed_url.scheme in ('http', 'https')
+                            and bool(parsed_url.hostname)
+                            and not parsed_url.username
+                            and not parsed_url.password
+                            and len(profile_url) <= 500
+                        )
+                    except ValueError:
+                        valid_url = False
+                    if not valid_url:
+                        errors.append(
+                            'If provided, the website URL must start with '
+                            'http:// or https://.')
+                if category and category not in categories:
+                    errors.append('Choose a category from the list.')
+
+            if errors:
+                for error in errors:
+                    flash(error, 'danger')
+                return render_template('suggest.html', categories=categories,
+                                       form_data=form_data), 400
+
+            admins = User.query.filter_by(is_admin=True).all()
+            if not admins:
+                app.logger.error(
+                    'Cannot deliver site suggestion: no admin accounts exist.')
+                flash('Your suggestion could not be delivered right now. '
+                      'Please try again later.', 'danger')
+                return render_template('suggest.html', categories=categories,
+                                       form_data=form_data), 503
+
+            type_label = ('Social network' if suggestion_type == 'social_network'
+                          else 'General site suggestion')
+            body = (
+                f'Submitted by: {name} <{email}>\n'
+                f'Suggestion type: {type_label}\n'
+                f'Profile / website URL: {profile_url or "Not provided"}\n'
+                f'Suggested category: {category or "Not applicable"}\n'
+                f'Adult content: {"Yes" if is_adult else "No"}\n\n'
+                f'Description:\n{description}\n\n'
+                'This submission is for admin consideration only. Inclusion '
+                'in the site catalogue is at the discretion of the site admins.'
+            )
+            message = Message(
+                subject=(f'{type_label}: {profile_url or description[:100]}'
+                         )[:200],
+                body=body,
+                category='site_suggestion',
+                severity=MESSAGE_CATEGORIES['site_suggestion'][
+                    'default_severity'],
+                sender=(current_user._get_current_object()
+                        if current_user.is_authenticated else None),
+                source='direct',
+            )
+            db.session.add(message)
+            db.session.flush()
+            deliver_message(message, admins)
+            Activity.record(
+                'site_suggestion_received',
+                actor=(current_user._get_current_object()
+                       if current_user.is_authenticated else None),
+                detail=f'{type_label} from {email}',
+            )
+            db.session.commit()
+            flash('Thanks for your suggestion! It has been sent to the site '
+                  'admins for consideration. Submissions are reviewed at '
+                  'their discretion and are not automatically added to the '
+                  'website.', 'success')
+            return redirect(url_for('suggest'))
+
+        return render_template('suggest.html', categories=categories,
+                               form_data=form_data)
 
     @app.route('/terms')
     def terms():

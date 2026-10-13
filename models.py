@@ -946,6 +946,7 @@ MESSAGE_CATEGORIES = {
     # Direct replies to a testimonial author (Story 3): outreach sent from
     # inside a testimonial record while resolving negative feedback.
     'review_reply':  {'label': 'Review reply / outreach', 'default_severity': 'info'},
+    'site_suggestion': {'label': 'Site suggestion',      'default_severity': 'info'},
 }
 
 # Severity levels, ordered by ascending urgency. Drives badge colour and

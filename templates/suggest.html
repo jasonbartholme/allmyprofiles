@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% block title %}Suggest a Social Network — AllMyProfiles{% endblock %}
+{% block description %}Suggest a social network or other site for the AllMyProfiles catalogue.{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-md-9 col-lg-7">
+      <h1 class="fw-bold mb-2">Suggest a social network or site</h1>
+      <p class="text-muted mb-4">
+        Tell us which network or site you would like to see supported. Suggestions
+        are sent directly to the site admins for review.
+      </p>
+
+      <div class="alert alert-info" role="note">
+        <i class="bi bi-info-circle me-1"></i>
+        Submissions will be considered for inclusion, but adding a network is
+        at the discretion of the site admins. Submitting a suggestion does not
+        guarantee it will be added to the website.
+      </div>
+
+      <div class="card p-4 p-md-5">
+        <form method="POST" action="{{ url_for('suggest') }}">
+          <div class="mb-3">
+            <label class="form-label" for="s_type">What would you like to suggest?</label>
+            <select class="form-select" id="s_type" name="suggestion_type" required>
+              <option value="social_network"
+                {{ 'selected' if form_data.get('suggestion_type', 'social_network') == 'social_network' }}>
+                A social network / link source
+              </option>
+              <option value="site"
+                {{ 'selected' if form_data.get('suggestion_type') == 'site' }}>
+                Another site suggestion
+              </option>
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="s_name">Your name</label>
+            <input class="form-control" id="s_name" name="name" required maxlength="120"
+                   value="{{ form_data.get('name', '') }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="s_email">Email</label>
+            <input class="form-control" id="s_email" name="email" type="email"
+                   required maxlength="120" placeholder="you@example.com"
+                   value="{{ form_data.get('email', '') }}">
+          </div>
+
+          <div class="mb-3" data-network-field>
+            <label class="form-label" for="s_url">Profile page URL</label>
+            <input class="form-control" id="s_url" name="profile_url" type="url"
+                   maxlength="500" placeholder="https://example.com/your-profile"
+                   value="{{ form_data.get('profile_url', '') }}">
+            <div class="form-text">Use a public profile page, not just the site's homepage.</div>
+          </div>
+
+          <div class="mb-3" data-network-field>
+            <label class="form-label" for="s_category">Suggested category</label>
+            <select class="form-select" id="s_category" name="category">
+              <option value="">Choose a category</option>
+              {% for category in categories %}
+              <option value="{{ category }}"
+                {{ 'selected' if form_data.get('category') == category }}>{{ category }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="s_description">Description / suggestion</label>
+            <textarea class="form-control" id="s_description" name="description"
+                      rows="5" maxlength="3000" required
+                      placeholder="What is the site or network, and why would it be useful to AllMyProfiles users?">{{ form_data.get('description', '') }}</textarea>
+          </div>
+
+          <div class="form-check mb-4" data-network-field>
+            <input class="form-check-input" id="s_adult" name="is_adult"
+                   type="checkbox" {{ 'checked' if form_data.get('is_adult') }}>
+            <label class="form-check-label" for="s_adult">
+              This network may contain adult content
+            </label>
+          </div>
+
+          <div class="visually-hidden" aria-hidden="true">
+            <label for="s_website">Leave this field empty</label>
+            <input id="s_website" name="website" tabindex="-1" autocomplete="off">
+          </div>
+
+          <button class="btn btn-primary rounded-pill px-4" type="submit">
+            <i class="bi bi-send me-1"></i>Send suggestion
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  var typeSelect = document.getElementById("s_type");
+  var urlInput = document.getElementById("s_url");
+  var categorySelect = document.getElementById("s_category");
+
+  function updateNetworkFields() {
+    var isNetwork = typeSelect.value === "social_network";
+    document.querySelectorAll("[data-network-field]").forEach(function (field) {
+      field.hidden = !isNetwork;
+    });
+    urlInput.required = isNetwork;
+    categorySelect.required = isNetwork;
+  }
+
+  typeSelect.addEventListener("change", updateNetworkFields);
+  updateNetworkFields();
+}());
+</script>
+{% endblock %}

@@ -154,6 +154,10 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
   `submit-contact`), each with its own thread view and archive/delete actions.
   Unread messages show a live badge count in the navbar and on the dashboard;
   opening a message marks it read, and messages can be archived / unarchived.
+- **Site suggestions** (`/suggest`) — visitors can recommend a social network
+  with its profile URL, catalogue category, description, and adult-content
+  status, or send another site suggestion. Submissions arrive in admin inboxes
+  for consideration; inclusion is at the site admins' discretion.
 - Profile extras: skills list, paid-tier video embed (YouTube/Vimeo URLs are
   parsed into safe embeds), curated theme picker (higher tiers unlock more
   themes).
