@@ -1,9 +1,8 @@
 # AllMyProfiles
 
-A SaaS "link-in-bio" service — one clean, SEO/AI-optimized public page
-(`/u/<username>`, also served at the bare `/<username>`) per user, with
+A SaaS "link-in-bio" service — one clean, SEO/AI-optimized public page served at the `/<username>`) per user, with
 click tracking, tiered link limits, an admin-to-user message inbox, a
-broken-link checker, an **admin-managed network catalogue** (Link Sources +
+broken-link checker, an **admin-managed network catalog** (Link Sources +
 Categories) that powers a graphical add-link picker and brand-styled public
 buttons, adult-content age gates, abuse reporting with a moderation
 workbench (reports, reply macros, triage rules, saved views), contact-form
@@ -42,7 +41,7 @@ create_admin.py         # CLI: create or promote a site-admin account
 check_links.py          # cron script: broken-link checker + inbox notifs
 templates/              # Jinja2 templates (incl. templates/admin/*)
 tests/                  # standalone smoke tests for public routes, billing,
-                        # directory, country, uploads, messaging and catalogue flows
+                        # directory, country, uploads, messaging and catalog flows
 uploads/                # ⚠ user-uploaded images — git-ignored, back this up!
 instance/, *.db         # dev SQLite database — git-ignored
 ```
@@ -99,7 +98,7 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
 > **Schema changes:** development auto-creates new tables via
 > `db.create_all()`, but **production needs explicit migrations**. Recent
 > features added tables — inbox messaging (`messages`, `message_reads`,
-> `link_check_results`), the link-source catalogue (`link_sources`,
+> `link_check_results`), the link-source catalog (`link_sources`,
 > `link_categories`), contact messages, abuse reports, reply macros, saved
 > views, triage rules, plus new columns on `users`/`links` — before
 > deploying, generate and apply the migration:
@@ -123,7 +122,7 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
   is on the Free tier.
 - Links manager: add / hide / delete, drag-and-drop ordering, click counts
 - **Graphical "Add a new link" picker** — instead of a plain text dropdown,
-  every network from the admin catalogue appears as one row with its icon
+  every network from the admin catalog appears as one row with its icon
   (Bootstrap icon or admin-uploaded image) and name rendered in official
   brand colors, plus a search filter and URL auto-detect. Selecting a
   network reveals a contextual, brand-tinted form whose fields adapt to that
@@ -155,7 +154,7 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
   Unread messages show a live badge count in the navbar and on the dashboard;
   opening a message marks it read, and messages can be archived / unarchived.
 - **Site suggestions** (`/suggest`) — visitors can recommend a social network
-  with its profile URL, catalogue category, description, and adult-content
+  with its profile URL, catalog category, description, and adult-content
   status, or send another site suggestion. Submissions arrive in admin inboxes
   for consideration; inclusion is at the site admins' discretion.
 - Profile extras: skills list, paid-tier video embed (YouTube/Vimeo URLs are
@@ -172,7 +171,7 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
   eligible opted-in profiles by canonical country, with country flags,
   featured members, and configurable pagination.
 
-## Link source catalogue (networks & categories)
+## Link source catalog (networks & categories)
 
 The look and behaviour of every link is driven by two admin-managed tables,
 seeded automatically on first run (`LinkCategory.seed_defaults()` /
@@ -181,7 +180,7 @@ seeded automatically on first run (`LinkCategory.seed_defaults()` /
 - **`link_categories`** — grouping buckets that become tabs on public
   profiles. Each carries presentation metadata: name, Bootstrap Icons code,
   background/text colors, sort order. Categories are referenced *by name*
-  from sources, so the catalogue keeps working even before migration/seeding;
+  from sources, so the catalog keeps working even before migration/seeding;
   deleting a category never orphans data (see CRUD rules below).
 - **`link_sources`** — one row per network (GitHub, Steam, TikTok, Etsy, …):
   matching domains (for URL auto-detect), example URL, `{handle}` profile
@@ -202,7 +201,7 @@ user picker but existing links keep their branding. Domain matching powers
 
 ### Admin → Link Categories (`/admin/link-categories`)
 
-Full CRUD designed for a catalogue spanning many niches:
+Full CRUD designed for a catalog spanning many niches:
 
 - **List** (`GET`) — live member-source counts per category, plus an
   "orphans" panel showing sources whose category was deleted (re-file them).
@@ -319,14 +318,14 @@ Site admins (`is_admin` flag) get a SaaS-style dashboard:
   max profile-image upload size (KB), directory and country page sizes,
   featured-directory limit, broken-link notification cooldown (days), site
   tagline, and Stripe price/portal settings
-- **Link Sources** (`/admin/link-sources`) — the network catalogue behind
+- **Link Sources** (`/admin/link-sources`) — the network catalog behind
   the graphical add-link picker and brand-styled buttons: create/edit,
   domains + `{handle}` pattern, brand colors, icon (built-in or uploaded),
   default CTA, category, active/adult/nofollow flags, soft delete + restore
 - **Link Categories** (`/admin/link-categories`) — full CRUD on the grouping
   buckets used for public-profile tabs: live source counts, orphan panel,
   rename cascade, protected `Other` fallback, reassignment-on-delete,
-  restore, drag-and-drop reorder (see *Link source catalogue* above)
+  restore, drag-and-drop reorder (see *Link source catalog* above)
 - **Reports / moderation** (`/admin/reports`) — queue of public abuse
   reports with status updates, bulk actions, and one-click "message the
   reporter" (opens compose prefilled); triage rules auto-assign new reports
@@ -337,7 +336,7 @@ Site admins (`is_admin` flag) get a SaaS-style dashboard:
 - **Saved views** (`POST /admin/saved-views`) — persist filtered user-list
   views for recurring admin workflows
 - **Audit log** (`/admin/audit`) — searchable activity history (signups,
-  tier changes, catalogue/category CRUD, impersonation, bulk actions…)
+  tier changes, catalog/category CRUD, impersonation, bulk actions…)
 
 Admin privileges are intentionally suspended while impersonating; logging out
 also ends any impersonation session. Every impersonation start/stop is written
@@ -371,7 +370,7 @@ The suite covers:
   static pages
 - `test_messaging_smoke.py` — inbox delivery, read/archive lifecycle, and
   link-check notifications
-- `test_catalogue_import_smoke.py` — Link Source import/export and validation
+- `test_catalog_import_smoke.py` — Link Source import/export and validation
 - `test_directory_smoke.py` — source-directory access and adult-content rules
 - `test_country_selector_smoke.py` — country selection, public labels, and
   directory-card flags
