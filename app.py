@@ -3108,12 +3108,14 @@ def register_admin_routes(app):
                     # Stripe billing config (price IDs + portal return URL).
                     'stripe_price_expanded', 'stripe_price_full',
                     'stripe_customer_portal_return',
-                    'gtm_container_id']
+                    'gtm_container_id',
+                    'cookie_banner_enabled', 'consent_policy_version']
         numeric = {'free_tier_max_links', 'expanded_tier_max_links',
                    'max_upload_size_kb', 'link_check_notify_days',
                    'directory_page_size', 'directory_featured_max',
-                   'country_page_size', 'country_sidebar_top'}
-        booleans = {'country_show_unrecognized'}
+                   'country_page_size', 'country_sidebar_top',
+                   'consent_policy_version'}
+        booleans = {'country_show_unrecognized', 'cookie_banner_enabled'}
         if request.method == 'POST':
             for key in editable:
                 if key in booleans:
@@ -5439,6 +5441,24 @@ def register_error_handlers(app):
         return redirect(request.referrer or url_for('dashboard'))
 
 
+_GEO_HEADERS = ('CF-IPCountry', 'CloudFront-Viewer-Country',
+                'X-Vercel-IP-Country', 'X-AppEngine-Country',
+                'Fastly-Client-Country', 'X-Country-Code')
+
+
+def _consent_region():
+    """'us' for US visitors (opt-out model), else 'strict' (opt-in).
+
+    Uses the country header set by the CDN/host. When no header is present
+    the visitor is treated as strict, the safe default.
+    """
+    for header in _GEO_HEADERS:
+        code = (request.headers.get(header) or '').strip().upper()
+        if code and code not in ('XX', 'T1'):
+            return 'us' if code == 'US' else 'strict'
+    return 'strict'
+
+
 def _valid_gtm_id(value):
     """Return a well-formed GTM container ID, else '' (tag disabled)."""
     value = (value or '').strip().upper()
@@ -5485,6 +5505,11 @@ def register_template_context(app):
             'APP_ENV': os.environ.get('FLASK_ENV', 'development'),
             'site_tagline': Setting.get('site_tagline'),
             'gtm_id': _valid_gtm_id(Setting.get('gtm_container_id')),
+            'consent': {
+                'enabled': Setting.get_bool('cookie_banner_enabled', True),
+                'region': _consent_region(),
+                'version': Setting.get_int('consent_policy_version', 1),
+            },
             'TIERS': TIERS,
             'unread_count': unread,
             'canonical_url': canonical_url,

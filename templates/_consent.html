@@ -1,0 +1,69 @@
+{# Cookie banner + preferences modal. Behaviour lives in static/js/consent.js #}
+{% if consent.enabled %}
+<div id="cookie-banner" class="d-none position-fixed bottom-0 start-0 end-0 bg-white border-top shadow-lg p-3"
+     style="z-index:1080;" role="region" aria-label="Cookie notice">
+  <div class="container d-flex flex-column flex-lg-row align-items-lg-center gap-3">
+    {% if consent.region == 'us' %}
+    <p class="small mb-0 flex-grow-1">
+      We use cookies for analytics and advertising. You can opt out at any time with
+      <strong>Your Privacy Choices</strong>. We honor Global Privacy Control signals.
+      <a href="{{ url_for('privacy') }}#cookies">Learn more</a>.
+    </p>
+    <div class="d-flex flex-wrap gap-2">
+      <button type="button" class="btn btn-primary btn-sm px-3" data-consent="ack">OK</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm px-3" data-consent="open">Your Privacy Choices</button>
+    </div>
+    {% else %}
+    <p class="small mb-0 flex-grow-1">
+      We use cookies to run the site and, with your permission, for analytics and
+      advertising (Google). Nothing optional loads until you choose.
+      <a href="{{ url_for('privacy') }}#cookies">Cookie policy</a>.
+    </p>
+    <div class="d-flex flex-wrap gap-2">
+      <button type="button" class="btn btn-primary btn-sm px-3" data-consent="accept">Accept all</button>
+      <button type="button" class="btn btn-primary btn-sm px-3" data-consent="reject">Reject all</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm px-3" data-consent="open">Customize</button>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="modal fade" id="cookie-modal" tabindex="-1" aria-labelledby="cookie-modal-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="cookie-modal-title">{{ 'Your Privacy Choices' if consent.region == 'us' else 'Cookie Settings' }}</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="consent-necessary" checked disabled>
+            <label class="form-check-label fw-semibold" for="consent-necessary">Strictly necessary</label>
+          </div>
+          <p class="small text-muted mb-0">Login session, security and your cookie choice. Always on.</p>
+        </div>
+        <div class="mb-3">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="consent-analytics">
+            <label class="form-check-label fw-semibold" for="consent-analytics">Analytics</label>
+          </div>
+          <p class="small text-muted mb-0">Google Tag Manager and Google Analytics, to understand how the site is used.</p>
+        </div>
+        <div class="mb-0">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="consent-ads">
+            <label class="form-check-label fw-semibold" for="consent-ads">Advertising</label>
+          </div>
+          <p class="small text-muted mb-0">Google AdSense and advertising cookies, used to show and measure ads{% if consent.region == 'us' %}. Turning this off opts you out of the sale/sharing of your data for advertising{% endif %}.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary btn-sm" data-consent="accept">Accept all</button>
+        <button type="button" class="btn btn-primary btn-sm" data-consent="reject">Reject all</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-consent="save">Save choices</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}

@@ -43,7 +43,21 @@
           <input type="text" maxlength="16" class="form-control" id="gtm_container_id"
                  name="gtm_container_id" value="{{ settings.gtm_container_id }}"
                  placeholder="GTM-XXXXXXX" pattern="(GTM-[A-Za-z0-9]{4,12})?">
-          <div class="form-text">Loaded on every page. Leave blank to disable.</div>
+          <div class="form-text">Loaded on every page once the visitor's cookie choice allows it. Leave blank to disable.</div>
+        </div>
+        <div class="col-sm-3 d-flex align-items-end">
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="cookie_banner_enabled"
+                   name="cookie_banner_enabled" value="true"
+                   {{ 'checked' if settings.cookie_banner_enabled in ('true', '1', 'yes', 'on') }}>
+            <label class="form-check-label" for="cookie_banner_enabled">Cookie banner</label>
+          </div>
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label" for="consent_policy_version">Consent version</label>
+          <input type="number" min="1" class="form-control" id="consent_policy_version"
+                 name="consent_policy_version" value="{{ settings.consent_policy_version }}">
+          <div class="form-text">Raise it to ask every visitor again.</div>
         </div>
         <div class="col-12 pt-3 border-top mt-2">
           <h3 class="h6 fw-bold mb-0"><i class="bi bi-diagram-3 me-2"></i>Public directory (<code>/directory</code>)</h3>
