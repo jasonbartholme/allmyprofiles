@@ -9,7 +9,7 @@
 {% block breadcrumb_title %}{{ 'Edit' if cat else 'New' }} FAQ category{% endblock %}
 
 {% block content %}
-<div class="container py-4" style="max-width: 720px;">
+<div class="container-fluid px-4 py-4">
   <h1 class="h2 fw-bold mb-3"><i class="bi bi-bookmarks text-primary me-2"></i>{{ 'Edit' if cat else 'New' }} FAQ category</h1>
   {{ dash.nav('faq-categories') }}
   <form method="post" class="card card-body">
