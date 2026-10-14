@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}Admin · Audit Log — All My Profiles{% endblock %}
+{% block breadcrumb_title %}Admin · Audit Log{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+  <h1 class="h2 fw-bold mb-3"><i class="bi bi-journal-text text-primary me-2"></i>Admin · Audit Log</h1>
+  {{ dash.nav('audit') }}
+
+  <form method="get" class="row g-2 mb-3">
+    <div class="col-md-4">
+      <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Search detail or event type">
+    </div>
+    <div class="col-md-3">
+      <select name="kind" class="form-select" aria-label="Event type">
+        <option value="">All event types</option>
+        {% for k in kinds %}<option value="{{ k }}" {{ 'selected' if k == kind }}>{{ k }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-primary">Filter</button>
+      {% if q or kind %}<a href="{{ url_for('admin_audit') }}" class="btn btn-outline-secondary">Clear</a>{% endif %}
+    </div>
+  </form>
+
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead><tr><th>When</th><th>Event</th><th>User</th><th>Actor</th><th>Detail</th></tr></thead>
+        <tbody>
+        {% for e in entries %}
+          <tr>
+            <td class="text-nowrap"><small>{{ e.created_at.strftime('%Y-%m-%d %H:%M') if e.created_at else '—' }}</small></td>
+            <td><span class="badge text-bg-secondary">{{ e.kind }}</span></td>
+            <td>{{ e.user.username if e.user else '—' }}</td>
+            <td>{{ e.actor.username if e.actor else '—' }}</td>
+            <td><small class="text-muted">{{ e.detail or '' }}</small></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="text-center text-muted py-4">No activity found.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if pagination.pages > 1 %}
+  <nav class="mt-3">
+    <ul class="pagination pagination-sm justify-content-center">
+      {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+        {% if p %}
+          <li class="page-item {{ 'active' if p == pagination.page }}">
+            <a class="page-link" href="{{ url_for('admin_audit', q=q, kind=kind, page=p) }}">{{ p }}</a></li>
+        {% else %}
+          <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% endif %}
+      {% endfor %}
+    </ul>
+  </nav>
+  {% endif %}
+</div>
+{% endblock %}

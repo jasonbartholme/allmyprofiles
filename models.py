@@ -44,6 +44,9 @@ DEFAULT_SETTINGS = {
     'stripe_customer_portal_return': '/dashboard',  # portal "back to site" URL
     # Google Tag Manager container ID (GTM-XXXXXXX). Blank disables the tag.
     'gtm_container_id': '',
+    # Cookie consent banner. Bump the version to re-ask every visitor.
+    'cookie_banner_enabled': 'true',
+    'consent_policy_version': '1',
 }
 
 

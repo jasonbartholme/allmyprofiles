@@ -3,15 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  {% if gtm_id %}
-  <!-- Google Tag Manager -->
-  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-  })(window,document,'script','dataLayer','{{ gtm_id }}');</script>
-  <!-- End Google Tag Manager -->
-  {% endif %}
+  {# Consent Mode defaults + conditional Google Tag Manager load (see static/js/consent.js) #}
+  <script id="consent-config" type="application/json">{{ {'enabled': consent.enabled, 'region': consent.region, 'version': consent.version, 'gtm': gtm_id}|tojson }}</script>
+  <script src="{{ url_for('static', filename='js/consent.js') }}"></script>
   <title>{% block title %}AllMyProfiles{% endblock %}</title>
 
   {# ===== Primary meta / indexing directives ===== #}
@@ -102,13 +96,14 @@
   {% block head %}{% endblock %}
 </head>
 <body class="d-flex flex-column min-vh-100">
-  {% if gtm_id %}
+  {% if gtm_id and (not consent.enabled or consent.region == 'us') %}
   <!-- Google Tag Manager (noscript) -->
   <noscript><iframe src="https://www.googletagmanager.com/ns.html?id={{ gtm_id }}"
   height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <!-- End Google Tag Manager (noscript) -->
   {% endif %}
   {# Pages may override these blocks: nav_mode -> "quiet" for a minimal, low-emphasis bar; show_breadcrumbs -> "no" to drop the breadcrumb row. #}
+  {% set shell_cls = 'container-fluid px-4' if request.path.startswith('/admin') else 'container' %}
   {% set quiet_nav %}{% block nav_mode %}{% endblock %}{% endset %}
   {% set quiet_nav = quiet_nav|trim == 'quiet' %}
   {% set show_crumbs %}{% block show_breadcrumbs %}{% endblock %}{% endset %}
@@ -116,7 +111,7 @@
   <a class="visually-hidden-focusable position-absolute m-2 p-2 bg-white rounded" href="#main-content" style="z-index:2000;">Skip to main content</a>
   <header>
   <nav class="navbar navbar-expand-lg {{ 'navbar-quiet py-1' if quiet_nav else 'bg-white shadow-sm' }}" aria-label="Primary">
-    <div class="container">
+    <div class="{{ shell_cls }}">
       <a class="navbar-brand {{ 'text-muted fw-normal fs-6' if quiet_nav else 'text-primary' }}" href="{{ url_for('home') }}">
         <img src="{{ url_for('static', filename='images/favicon-96x96.png') }}" alt="" width="{{ 20 if quiet_nav else 28 }}" height="{{ 20 if quiet_nav else 28 }}" class="me-2 align-text-bottom rounded">AllMyProfiles
       </a>
@@ -194,7 +189,7 @@
       {% endif %}
     {% endwith %}
     {% if show_crumbs %}
-    <nav class="container pt-3" aria-label="Breadcrumb">
+    <nav class="{{ shell_cls }} pt-3" aria-label="Breadcrumb">
       <ol class="site-breadcrumb list-unstyled d-flex flex-wrap align-items-center gap-2 mb-0 small text-muted">
         <li><a href="{{ url_for('home') }}">Home</a></li>
         {% block breadcrumb_parents %}<li aria-hidden="true">\</li>{% endblock %}
@@ -206,7 +201,7 @@
   </main>
 
   <footer class="py-5 bg-white border-top">
-    <div class="container">
+    <div class="{{ shell_cls }}">
       <div class="row gy-4">
         <div class="col-lg-4">
           <span class="navbar-brand fw-bold text-primary fs-5">
@@ -249,6 +244,9 @@
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('terms') }}">Terms of Service</a></li>
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('privacy') }}">Privacy Policy</a></li>
             <li class="mb-2"><a class="text-decoration-none" href="{{ url_for('ai_grounding') }}">AI Grounding</a></li>
+            {% if consent.enabled %}
+            <li class="mb-2"><a class="text-decoration-none" href="#" data-consent="open">{{ 'Your Privacy Choices' if consent.region == 'us' else 'Cookie Settings' }}</a></li>
+            {% endif %}
           </ul>
         </div>
       </div>
@@ -260,6 +258,7 @@
     </div>
   </footer>
 
+  {% include '_consent.html' %}
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   {% block scripts %}{% endblock %}
 </body>
