@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% import 'admin/_nav.html' as dash %}
+{% block title %}Admin · Triage Rules — All My Profiles{% endblock %}
+{% block breadcrumb_title %}Admin · Triage Rules{% endblock %}
+
+{% macro rule_fields(r) %}
+  <div class="col-md-3">
+    <label class="form-label small mb-0">Name</label>
+    <input name="name" class="form-control form-control-sm" maxlength="80" required value="{{ r.name if r else '' }}">
+  </div>
+  <div class="col-md-2">
+    <label class="form-label small mb-0">Reason</label>
+    <select name="match_reason" class="form-select form-select-sm">
+      <option value="">Any</option>
+      {% for key, label in reasons.items() %}
+        <option value="{{ key }}" {{ 'selected' if r and r.match_reason == key }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <label class="form-label small mb-0">Link domain contains</label>
+    <input name="match_domain" class="form-control form-control-sm" maxlength="120" value="{{ r.match_domain if r and r.match_domain else '' }}">
+  </div>
+  <div class="col-md-2">
+    <label class="form-label small mb-0">Details contain</label>
+    <input name="match_keyword" class="form-control form-control-sm" maxlength="80" value="{{ r.match_keyword if r and r.match_keyword else '' }}">
+  </div>
+  <div class="col-md-1">
+    <label class="form-label small mb-0">Set status</label>
+    <select name="set_status" class="form-select form-select-sm">
+      {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if (r.set_status if r else 'reviewing') == s }}>{{ s|capitalize }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="col-md-1">
+    <label class="form-label small mb-0">Priority</label>
+    <input type="number" name="priority" class="form-control form-control-sm" value="{{ r.priority if r else 0 }}">
+  </div>
+  <div class="col-md-12">
+    <label class="form-label small mb-0">Note added to the report</label>
+    <input name="note" class="form-control form-control-sm" maxlength="300" value="{{ r.note if r and r.note else '' }}">
+  </div>
+{% endmacro %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+  <h1 class="h2 fw-bold mb-3"><i class="bi bi-funnel text-primary me-2"></i>Admin · Triage Rules</h1>
+  {{ dash.nav('triage') }}
+  <p class="text-muted">Rules run against new abuse reports in priority order (highest first). Blank matchers match anything.</p>
+
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">New rule</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('admin_triage_new') }}" class="row g-2">
+        {{ rule_fields(none) }}
+        <div class="col-12"><button class="btn btn-primary btn-sm rounded-pill px-3">Add rule</button></div>
+      </form>
+    </div>
+  </div>
+
+  {% for r in rules %}
+  <div class="card mb-3 {{ '' if r.is_active else 'opacity-75' }}">
+    <div class="card-body">
+      <form method="post" action="{{ url_for('admin_triage_edit', rule_id=r.id) }}" class="row g-2">
+        <input type="hidden" name="is_active" value="{{ 'on' if r.is_active else 'off' }}">
+        {{ rule_fields(r) }}
+        <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
+          <button class="btn btn-sm btn-outline-primary">Save</button>
+          <button class="btn btn-sm btn-outline-secondary" formaction="{{ url_for('admin_triage_toggle', rule_id=r.id) }}">
+            {{ 'Pause' if r.is_active else 'Enable' }}</button>
+          <button class="btn btn-sm btn-outline-danger" formaction="{{ url_for('admin_triage_delete', rule_id=r.id) }}"
+                  onclick="return confirm('Delete this rule?')">Delete</button>
+          {% if not r.is_active %}<span class="badge text-bg-secondary">Paused</span>{% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+  {% else %}
+  <p class="text-center text-muted py-4">No triage rules yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}
