@@ -15,6 +15,14 @@ Note: Heroku-style "postgres://" URLs are normalized to "postgresql://".
 import os
 
 
+def _normalize_db_url(url):
+    # Some platforms (e.g. older Heroku buildpacks) hand out "postgres://"
+    # which SQLAlchemy < 2.x does not recognize.
+    if url.startswith('postgres://'):
+        return url.replace('postgres://', 'postgresql://', 1)
+    return url
+
+
 class Config:
     """Base configuration shared by all environments."""
 
@@ -64,17 +72,12 @@ class ProductionConfig(Config):
 
     DEBUG = False
 
-    def __init__(self):
-        super().__init__()
-        database_url = os.environ.get(
-            'DATABASE_URL',
-            'postgresql://username:password@localhost:5432/allmyprofiles',
-        )
-        # Some platforms (e.g. older Heroku buildpacks) hand out "postgres://"
-        # which SQLAlchemy < 2.x does not recognize.
-        if database_url.startswith('postgres://'):
-            database_url = database_url.replace('postgres://', 'postgresql://', 1)
-        self.SQLALCHEMY_DATABASE_URI = database_url
+    # Class attribute on purpose: Flask's from_object() reads the class, not an
+    # instance, so setting this in __init__ left it undefined.
+    SQLALCHEMY_DATABASE_URI = _normalize_db_url(os.environ.get(
+        'DATABASE_URL',
+        'postgresql://localhost:5432/allmyprofiles',
+    ))
 
 
 class TestingConfig(Config):
