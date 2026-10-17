@@ -111,6 +111,12 @@ class FakeClient:
                               'primary': True, 'verified': True}])
         return FakeResp(self.profile)
 
+    def userinfo(self, *a, **kw):
+        # Authlib's OIDC shortcut used for providers whose userinfo URL is
+        # discovered via server metadata (google/microsoft). Mirrors what the
+        # real client returns: the parsed payload itself.
+        return dict(self.profile)
+
     def authorize_redirect(self, redirect_uri, **kw):
         from flask import redirect as _r
         return _r('https://provider.example/authorize?state=xyz')
