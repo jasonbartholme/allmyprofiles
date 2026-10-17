@@ -1,0 +1,26 @@
+{# Social sign-in buttons (Google / Meta / Microsoft / GitHub).
+
+    Rendered on the login and register pages. `oauth_providers` comes from
+    the app context processor and only lists providers whose credentials are
+    configured; when empty nothing renders, so the standard email/password
+    forms are completely untouched. #}
+{% if oauth_providers %}
+<div class="d-flex align-items-center my-4">
+  <hr class="flex-grow-1 m-0">
+  <span class="px-3 text-muted small text-nowrap">or continue with</span>
+  <hr class="flex-grow-1 m-0">
+</div>
+<div class="d-grid gap-2 mb-3">
+  {% for p in oauth_providers %}
+  <a class="btn btn-outline-secondary d-flex align-items-center justify-content-center gap-2"
+     rel="nofollow"
+     href="{{ url_for('oauth.begin', name=p.key, next=request.args.get('next')) }}">
+    <i class="bi {{ p.icon }} fs-5"></i><span>{{ p.label }}</span>
+  </a>
+  {% endfor %}
+</div>
+<p class="text-muted small text-center mb-0">
+  Social sign-in creates or links to your account automatically — your
+  existing email &amp; password login keeps working either way.
+</p>
+{% endif %}

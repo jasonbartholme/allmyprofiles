@@ -7,7 +7,7 @@ Import `db` from this module when creating tables / running migrations:
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import parse_qsl
 
 from flask_sqlalchemy import SQLAlchemy
@@ -289,6 +289,99 @@ def url_for_upload(rel_path):
     """Public URL for a file inside UPLOAD_FOLDER (served via /uploads)."""
     from flask import url_for
     return url_for('uploaded_file', filename=rel_path)
+
+
+class UserOAuthAccount(db.Model):
+    """Third-party (social) login identities attached to a local user account.
+
+    Kept in its own table so the standard email/password auth on ``users``
+    is never modified or destroyed — OAuth data is strictly *appended*:
+      * one row per (provider, provider account id) pair;
+      * a user may link several providers at once (google + github + ...);
+      * unlinking deletes only this row, never the user record.
+
+    ``to_public_dict()`` exposes a safe view for templates/admin screens —
+    tokens are deliberately excluded from it.
+    """
+    __tablename__ = 'user_oauth_accounts'
+
+    # Providers supported by the auth epic (see oauth_login.OAUTH_PROVIDERS).
+    PROVIDERS = ('google', 'facebook', 'microsoft', 'github')
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                        nullable=False, index=True)
+
+    # Lowercase provider key: 'google' | 'facebook' | 'microsoft' | 'github'
+    provider = db.Column(db.String(20), nullable=False)
+    # Stable unique id returned by the provider (sub / id / user_id).
+    provider_user_id = db.Column(db.String(191), nullable=False)
+    # Email reported by the provider (may be None if scope not granted).
+    email = db.Column(db.String(255), nullable=True)
+    email_verified = db.Column(db.Boolean, default=False, nullable=False,
+                               server_default='0')
+    # Display name / avatar reported by the provider at link time.
+    name = db.Column(db.String(255), nullable=True)
+    picture_url = db.Column(db.String(500), nullable=True)
+
+    # Raw profile payload returned by the provider's userinfo endpoint
+    # (JSON text) — handy for debugging and future fields without a schema
+    # change.
+    raw_profile = db.Column(db.Text, nullable=True)
+
+    # OAuth tokens. Stored as JSON text ("{...}"). NOTE: the upstream plan
+    # called for encryption at rest; until an app-level cipher is added,
+    # treat the DB (and its backups) as secret material. Refresh tokens are
+    # long-lived; access tokens expire quickly and are mostly informational.
+    access_token = db.Column(db.Text, nullable=True)
+    refresh_token = db.Column(db.Text, nullable=True)
+    token_expires_at = db.Column(db.DateTime, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
+    last_used_at = db.Column(db.DateTime, nullable=True)
+
+    user = db.relationship('User',
+                           backref=db.backref('oauth_accounts',
+                                              lazy='dynamic',
+                                              cascade='all, delete-orphan'))
+
+    __table_args__ = (
+        # A provider account can only ever be linked to one local user.
+        db.UniqueConstraint('provider', 'provider_user_id',
+                            name='uq_oauth_provider_uid'),
+    )
+
+    def to_public_dict(self):
+        """Safe serialisation for templates / admin views (no tokens)."""
+        return {
+            'id': self.id,
+            'provider': self.provider,
+            'email': self.email,
+            'name': self.name,
+            'email_verified': bool(self.email_verified),
+            'linked_at': (self.created_at.strftime('%Y-%m-%d')
+                          if self.created_at else None),
+            'last_used_at': (self.last_used_at.strftime('%Y-%m-%d %H:%M')
+                             if self.last_used_at else None),
+        }
+
+    def store_tokens(self, token):
+        """Persist the token dict returned by the provider's token endpoint."""
+        import json as _json
+        token = token or {}
+        self.access_token = _json.dumps(token) if token else None
+        expires_in = token.get('expires_in')
+        if isinstance(expires_in, (int, float)):
+            self.token_expires_at = datetime.now() + timedelta(
+                seconds=int(expires_in))
+        # Refresh token lives inside the response when scope asks for it.
+        rt = token.get('refresh_token')
+        if rt:
+            self.refresh_token = rt
+
+    def __repr__(self):
+        return (f'<UserOAuthAccount {self.provider}:{self.provider_user_id} '
+                f'user_id={self.user_id}>')
 
 
 class Activity(db.Model):

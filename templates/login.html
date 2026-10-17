@@ -26,6 +26,8 @@
           <button type="submit" class="btn btn-primary w-100 rounded-pill py-2">Log in</button>
         </form>
 
+        {% include '_auth_buttons.html' %}
+
         <hr class="my-4">
         <p class="text-center mb-0">New here?
           <a href="{{ url_for('register') }}" class="fw-semibold text-decoration-none">Create a free account</a>
