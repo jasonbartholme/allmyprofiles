@@ -77,6 +77,21 @@ python create_admin.py --username admin --email you@example.com   # one-time
 python app.py                 # http://127.0.0.1:5000
 ```
 
+> **If `pip install` fails with "Failed building wheel for cryptography":**
+> your pip (or the one bundled in your virtualenv) is too old to pick up the
+> prebuilt binary wheels and is trying to compile Rust source instead. Fix it
+> inside your activated virtualenv before installing:
+>
+> ```bash
+> python -m pip install --upgrade pip setuptools wheel
+> pip install -r requirements.txt
+> ```
+>
+> On macOS (Intel or Apple Silicon) this always resolves to a binary wheel —
+> no Xcode/Rust toolchain needed. `cryptography` is pulled in by Authlib for
+> the OAuth providers; it is listed explicitly in `requirements.txt` so the
+> resolver prefers the wheel.
+
 Tables and default site settings are auto-created in development.
 
 ## Configuration
