@@ -103,7 +103,7 @@ class ProductionConfig(Config):
     # instance, so setting this in __init__ left it undefined.
     SQLALCHEMY_DATABASE_URI = _normalize_db_url(os.environ.get(
         'DATABASE_URL',
-        'postgresql://jbartholme-5485.postgres.pythonanywhere-services.com/allmyprofiles',
+        'postgresql+psycopg:/super:AnnyongHaseyo20!@super.postgres.pythonanywhere.com:5432/allmyprofiles',
     ))
 
 
