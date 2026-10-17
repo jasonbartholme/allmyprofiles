@@ -7,7 +7,7 @@ Production  -> PostgreSQL (via DATABASE_URL environment variable).
 Set FLASK_ENV=production (or use the ProductionConfig class directly on
 your host) and export DATABASE_URL, e.g.:
 
-    export DATABASE_URL=postgresql://user:password@localhost:5432/allmyprofiles
+    export DATABASE_URL=postgresql://jbartholme-5485.postgres.pythonanywhere-services.com/allmyprofiles
 
 Note: Heroku-style "postgres://" URLs are normalized to "postgresql://".
 """
