@@ -57,6 +57,33 @@ class Config:
     STRIPE_PRICE_EXPANDED = os.environ.get('STRIPE_PRICE_EXPANDED', '')
     STRIPE_PRICE_FULL = os.environ.get('STRIPE_PRICE_FULL', '')
 
+    # --- Third-party (social) sign-in -------------------------------------
+    # See oauth_login.py for the full flow. Providers whose id AND secret are
+    # both set appear as buttons on /login and /register; the rest stay
+    # hidden, so missing credentials never break anything.
+    #   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET           (Google Cloud console)
+    #   FACEBOOK_CLIENT_ID / FACEBOOK_CLIENT_SECRET       (Meta developers)
+    #   MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET     (Entra ID app)
+    #   GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET           (GitHub OAuth apps)
+    # Register the redirect URI with each provider:
+    #   https://<your-host>/auth/<provider-key>/callback
+    GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+    GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+    FACEBOOK_CLIENT_ID = os.environ.get('FACEBOOK_CLIENT_ID', '')
+    FACEBOOK_CLIENT_SECRET = os.environ.get('FACEBOOK_CLIENT_SECRET', '')
+    MICROSOFT_CLIENT_ID = os.environ.get('MICROSOFT_CLIENT_ID', '')
+    MICROSOFT_CLIENT_SECRET = os.environ.get('MICROSOFT_CLIENT_SECRET', '')
+    GITHUB_CLIENT_ID = os.environ.get('GITHUB_CLIENT_ID', '')
+    GITHUB_CLIENT_SECRET = os.environ.get('GITHUB_CLIENT_SECRET', '')
+
+    # provider key -> (env var holding client id, env var holding secret)
+    OAUTH_CREDENTIAL_ENV_MAP = {
+        'google': ('GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'),
+        'facebook': ('FACEBOOK_CLIENT_ID', 'FACEBOOK_CLIENT_SECRET'),
+        'microsoft': ('MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET'),
+        'github': ('GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET'),
+    }
+
 
 class DevelopmentConfig(Config):
     """SQLite for local development."""

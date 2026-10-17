@@ -14,5 +14,8 @@ psycopg[binary]>=3.1   # psycopg3 — works with postgresql+psycopg:// URLs
 Pillow>=10.0
 requests>=2.32
 
+# Third-party sign-in (Google / Meta / Microsoft / GitHub) — oauth_login.py
+Authlib>=1.3
+
 # Stripe — subscription billing & admin SaaS overview (stripe_billing.py)
 stripe>=12.0

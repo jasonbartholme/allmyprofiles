@@ -41,6 +41,8 @@ from uploads_util import (BACKGROUND_MAX_IMAGE_DIMENSION, save_upload_image,
                           delete_upload_image)
 import catalogue_io
 import stripe_billing
+from oauth_login import (oauth_bp, init_oauth, available_providers,
+                         provider_display_maps)
 
 login_manager = LoginManager()
 login_manager.login_view = 'login'
@@ -658,6 +660,11 @@ def create_app(config_name=None):
     # rebuild) for ALTERs, which SQLite needs; it's harmless on PostgreSQL.
     migrate = Migrate(app, db, render_as_batch=True)
     login_manager.init_app(app)
+    # Third-party sign-in (Authlib). Safe with zero credentials configured:
+    # unconfigured providers are hidden from the UI and their routes show a
+    # "not configured" notice instead of failing. See oauth_login.py.
+    init_oauth(app)
+    app.register_blueprint(oauth_bp)
 
     # When running under the plain dev server, make sure tables + default
     # settings exist. In production use `flask db upgrade` instead.
@@ -696,6 +703,27 @@ def create_app(config_name=None):
 # ==========================================
 # Core Routes
 # ==========================================
+
+def _oauth_providers():
+    """Configured social providers for the login/register buttons.
+
+    Wrapped defensively: if anything in the OAuth layer misbehaves the auth
+    epic simply shows no extra buttons — standard email/password login can
+    never be blocked by it.
+    """
+    try:
+        return available_providers()
+    except Exception:
+        return []
+
+
+def _provider_label_map():
+    """(labels, icons) dicts; safe fallback when OAuth layer is broken."""
+    try:
+        return provider_display_maps()
+    except Exception:
+        return {}, {}
+
 
 def _dashboard_example_link():
     """A populated sample Link used on /dashboard to preview styling.
@@ -5511,6 +5539,15 @@ def register_template_context(app):
                 'version': Setting.get_int('consent_policy_version', 1),
             },
             'TIERS': TIERS,
+            # Social sign-in buttons (login/register/_auth_buttons.html).
+            # Empty list when no provider credentials are configured — the
+            # partial then renders nothing and standard auth is unchanged.
+            'oauth_providers': _oauth_providers(),
+            # Provider label/icon maps for the dashboard "Sign-in methods"
+            # card (renders linked accounts even if a provider was later
+            # unconfigured).
+            'provider_labels': _provider_label_map()[0],
+            'provider_icons': _provider_label_map()[1],
             'unread_count': unread,
             'canonical_url': canonical_url,
             'site_url': site_url,
