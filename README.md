@@ -1,12 +1,15 @@
 # AllMyProfiles
 
-A SaaS "link-in-bio" service — one clean, SEO/AI-optimized public page served at the `/<username>`) per user, with
+A SaaS "link-in-bio" service — one clean, SEO/AI-optimized public page served at
+`/<username>` per user, with
 click tracking, tiered link limits, an admin-to-user message inbox, a
 broken-link checker, an **admin-managed network catalog** (Link Sources +
 Categories) that powers a graphical add-link picker and brand-styled public
 buttons, adult-content age gates, abuse reporting with a moderation
 workbench (reports, reply macros, triage rules, saved views), contact-form
-routing into the inbox, and a full SaaS-style admin panel (metrics, activity
+routing into the inbox (with optional Gmail SMTP delivery to profile owners),
+**third-party sign-in** (Google, Meta, Microsoft, GitHub) alongside standard
+email/password auth, and a full SaaS-style admin panel (metrics, activity
 audit log, impersonation, site settings).
 
 ## Stack
@@ -15,6 +18,11 @@ audit log, impersonation, site settings).
 - **Flask-SQLAlchemy** + **Flask-Migrate** (schema migrations)
 - **Flask-Login** (sessions), **Pillow** (profile-image upload processing),
   **requests** (broken-link checker)
+- **Authlib** (third-party OAuth login: Google, Meta/Facebook, Microsoft,
+  GitHub — see *Third-party authentication* below)
+- **Outbound email** via Python's stdlib `smtplib` (`mail_util.py`) — no
+  extra dependency; Gmail or any SMTP provider, configured from the admin
+  dashboard with `MAIL_*` env-var fallbacks
 - **Bootstrap 5** + Bootstrap Icons + SortableJS (CDN; no build step)
 - **watchdog** pinned `>=4.0,<6.1` in `requirements.txt` — Werkzeug's
   debug reloader imports `EVENT_TYPE_OPENED`, which very old watchdog
@@ -31,17 +39,22 @@ audit log, impersonation, site settings).
 app.py                  # routes: marketing site, auth, dashboard, inbox,
                         # public profiles, admin panel, static pages
 config.py               # Development / Production / Testing configs
-models.py               # User, Link, LinkSource, LinkCategory, Setting,
-                        # Activity, Message, MessageRead, LinkCheckResult,
-                        # ContactMessage, AbuseReport, ReplyMacro, SavedView,
-                        # TriageRule, Testimonial, TestimonialReply,
-                        # ContentSection
+models.py               # User, UserOAuthAccount, Link, LinkSource,
+                        # LinkCategory, Setting, Activity, Message,
+                        # MessageRead, LinkCheckResult, ContactMessage,
+                        # AbuseReport, ReplyMacro, SavedView, TriageRule,
+                        # Testimonial, TestimonialReply, ContentSection
+oauth_login.py          # Authlib blueprint: Google/Meta/Microsoft/GitHub
+                        # login, linking, unlinking (append-only)
+mail_util.py            # SMTP email sending + admin-configurable settings
+                        # (Gmail or any provider; MAIL_* env fallbacks)
 uploads_util.py         # image validation / re-encoding / storage helpers
 create_admin.py         # CLI: create or promote a site-admin account
 check_links.py          # cron script: broken-link checker + inbox notifs
 templates/              # Jinja2 templates (incl. templates/admin/*)
 tests/                  # standalone smoke tests for public routes, billing,
-                        # directory, country, uploads, messaging and catalog flows
+                        # directory, country, uploads, messaging, catalog,
+                        # OAuth and SMTP flows
 uploads/                # ⚠ user-uploaded images — git-ignored, back this up!
 instance/, *.db         # dev SQLite database — git-ignored
 ```
@@ -79,6 +92,29 @@ Tables and default site settings are auto-created in development.
 Other environment variables: `SECRET_KEY`, `UPLOAD_FOLDER`
 (default `./uploads`).
 
+**OAuth (third-party login)** — per-provider credentials in `.env` / the
+environment (dev and prod alike):
+
+| Env vars                          | Provider            |
+|-----------------------------------|---------------------|
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`       | Google        |
+| `FACEBOOK_CLIENT_ID` / `FACEBOOK_CLIENT_SECRET`   | Meta/Facebook |
+| `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | Microsoft (Entra ID) |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`       | GitHub        |
+
+Providers without credentials simply don't appear on the login/signup pages;
+standard email/password auth always works. Redirect URIs to register with
+each provider: `https://<yoursite>/auth/<provider>/callback` (e.g.
+`/auth/google/callback`).
+
+**Outbound email (SMTP)** — optional env-var fallbacks for the admin-config
+section (DB settings saved from the dashboard take precedence):
+`MAIL_ENABLED`, `MAIL_SERVER`, `MAIL_PORT`, `MAIL_SECURITY`
+(`ssl` | `starttls`), `MAIL_USERNAME`, `MAIL_PASSWORD`,
+`MAIL_DEFAULT_SENDER`, `MAIL_SENDER_NAME`. For Gmail, use a
+**16-character App Password** (2-step verification required), not the
+account password.
+
 ## Running in production (PostgreSQL)
 
 ```bash
@@ -97,9 +133,11 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
 
 > **Schema changes:** all earlier migrations were squashed into one baseline,
 > `0001baseline`, which creates every table and seeds the link categories,
-> link sources, FAQs and content sections. A fresh database only needs
-> `flask db upgrade`. For future model changes, generate and commit a new
-> migration on top of it:
+> link sources, FAQs and content sections. Follow-up migrations:
+> `0002oauth_accounts` (creates the `user_oauth_accounts` table) and
+> `0003smtp_settings` (seeds the SMTP setting keys). A fresh database only
+> needs `flask db upgrade`. For future model changes, generate and commit a
+> new migration on top of it:
 >
 > ```bash
 > flask db migrate -m "describe the change"   # run once, commit the result
@@ -108,7 +146,10 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
 
 ## User features
 
-- Register / login, editable profile (display name, headline, bio, about)
+- Register / login — **standard email/password auth plus optional
+  third-party sign-in** with Google, Meta (Facebook), Microsoft and GitHub
+  (see *Third-party authentication* below). Editable profile (display name,
+  headline, bio, about).
 - **Avatar upload** — PNG/JPG/GIF/WEBP files stored **locally** on the server
   under `uploads/avatars/` (images are validated, EXIF-stripped, resized to
   ≤512 px and re-encoded as JPEG). An external avatar URL still works as a
@@ -138,11 +179,13 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
   page (`profile_agegate.html`) when the viewer hasn't confirmed.
 - **Public abuse reporting** — visitors can report a profile via `/report`
   and `/report/<username>`; reports land in the admin moderation queue.
-- Public SEO-friendly profile page at `/u/<username>` (OG tags + JSON-LD
+- **Linked accounts** — the dashboard shows connected social providers with
+  one-click connect/unlink (unlinking never touches the user record).
+- Public SEO-friendly profile page at `/<username>` (OG tags + JSON-LD
   schema.org markup so pages rank in Google and parse cleanly for AI search).
   Machine-readable extras: `/llms.txt`, `/ai-grounding` facts page, XML
   sitemaps (static + per-profile pages), `/robots.txt`, and a
-  `/u/<username>/links.xml` feed per profile.
+  `/<username>/links.xml` feed per profile.
 - Tiers: **Free** (default cap 3 active links), **Expanded** (10),
   **Full / Custom** (unlimited) — caps are live-editable from admin settings
 - **Inbox** (`/inbox`) — receives messages from the site admin (announcements,
@@ -168,6 +211,62 @@ Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
 - **Country discovery** — `/countries` and `/country/<country>` list
   eligible opted-in profiles by canonical country, with country flags,
   featured members, and configurable pagination.
+
+## Third-party authentication (OAuth epic)
+
+Social sign-in is implemented with **Authlib** (authorization-code flow) for
+four providers — **Google, Meta (Facebook), Microsoft (Entra ID) and GitHub** —
+alongside the fully retained standard email/password auth.
+
+Design guarantees:
+
+- **Append-only to existing users.** All OAuth data lives in a separate
+  `user_oauth_accounts` table (`models.UserOAuthAccount`). The `users` table
+  is never modified or destroyed by OAuth; linking adds rows, unlinking
+  deletes only the row. A user can link multiple providers at once.
+- **The table is an object.** `UserOAuthAccount` exposes provider id, email
+  (+verified flag), display name, avatar URL, cached profile JSON, and stored
+  access/refresh tokens with expiry, plus a safe `to_public_dict()` view
+  (tokens excluded) for templates/admin screens, and a `user.oauth_accounts`
+  backref.
+- **Login / signup / linking** (`oauth_login.py`, blueprint mounted at
+  `/auth`):
+  - `/auth/<provider>/login` starts the flow (CSRF state handled by Authlib);
+    signed-out visitors may get a new account (with a random placeholder
+    password so the local schema stays intact), while signed-in users *link*
+    the provider to their current account.
+  - `/auth/<provider>/callback` matches by provider account id → links by
+    verified email when unambiguous → otherwise creates a new user.
+  - `POST /auth/unlink/<provider>` removes just that connection.
+- **Graceful degradation.** Providers without `.env` credentials simply don't
+  render on the login/signup/dashboard pages, and any failure inside the
+  OAuth layer falls back to normal password auth — auth can never block core
+  app functionality.
+- **Schema:** created by migration `0002oauth_accounts` (Integer FK parity
+  with `users.id`, unique `(provider, provider_user_id)`). Run
+  `flask db upgrade` after deploying.
+
+Credentials live in dev/prod `.env` files (see *Configuration* above for the
+variable names and the callback URLs to register with each provider).
+
+## Outbound email (Gmail SMTP)
+
+Contact-form messages can optionally be emailed to profile owners via SMTP,
+configured from **Admin → Site settings → "Email delivery (SMTP)"**: enable
+switch, server (e.g. `smtp.gmail.com`), port, security (`SSL` for 465 /
+`STARTTLS` for 587), username, password, and From address/name — saved to the
+`settings` table, with two admin actions: **Test connection** and **Send test
+email**. Implementation is stdlib-only (`mail_util.py`: `smtplib` +
+`email.message`), works with Gmail or any provider, and stores secrets with
+round-trip protection so unchanged masked values aren't overwritten.
+
+- Priority order: DB settings (dashboard) → `MAIL_*` env fallbacks → disabled.
+- When email isn't configured, contact forms still work exactly as before
+  (inbox delivery only) — nothing breaks.
+- For Gmail: create a **16-character App Password** (Google account →
+  Security → 2-Step Verification → App passwords). Regular account passwords
+  are rejected by Google.
+- Schema: setting keys seeded by migration `0003smtp_settings`.
 
 ## Link source catalog (networks & categories)
 
@@ -243,10 +342,15 @@ served by the `home()` route):
 
 Supporting public routes: `/api/check-username`, `/help`, `/contact`
 (form submissions are logged as `contact_request` activity events and
-surface on the admin dashboard — no email service wired up yet),
+surface on the admin dashboard; when SMTP is configured under
+Admin → Site settings, they are also emailed to the recipient),
 `/terms`, `/privacy`, `/report` + `/report/<username>` (public abuse
 reports → admin moderation queue). Reserved usernames (e.g. `admin`,
 `help`, `api`) are blocked at registration and in the availability API.
+
+> **Note:** public profiles are served at bare `/<username>` (the older
+> `/u/<username>` prefix was removed); sitemaps, feeds and canonical URLs
+> all use the new form.
 
 ## Admin messaging & user inbox
 
@@ -315,7 +419,9 @@ Site admins (`is_admin` flag) get a SaaS-style dashboard:
   Free-tier max links (kept at **3** by default), Expanded-tier max links,
   max profile-image upload size (KB), directory and country page sizes,
   featured-directory limit, broken-link notification cooldown (days), site
-  tagline, and Stripe price/portal settings
+  tagline, Stripe price/portal settings, and the **Email delivery (SMTP)**
+  section (enable Gmail/any-provider outbound email, test connection, send
+  a test email)
 - **Link Sources** (`/admin/link-sources`) — the network catalog behind
   the graphical add-link picker and brand-styled buttons: create/edit,
   domains + `{handle}` pattern, brand colors, icon (built-in or uploaded),
@@ -376,6 +482,12 @@ The suite covers:
   validation
 - `test_stripe_smoke.py` — checkout degradation, Stripe tier sync, webhooks,
   and billing UI
+- `test_oauth_smoke.py` — provider registration, login/link/unlink flows,
+  append-only guarantees for the `users` table, and graceful degradation
+  when provider credentials are absent
+- `test_smtp_settings_smoke.py` — admin SMTP settings persistence, validation,
+  secret round-tripping, connection/test-email paths, and contact-form email
+  routing (inbox delivery continues with SMTP disabled)
 
 ## Payments / billing
 

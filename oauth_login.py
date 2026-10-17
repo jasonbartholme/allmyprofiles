@@ -329,10 +329,14 @@ def callback(name):
             profile = resp.json()
         else:
             userinfo = meta['userinfo_url'] or ''
-            resp = client.get(userinfo,
-                              access_token=token.get('access_token')) \
-                if userinfo else client.userinfo()
-            profile = resp.json()
+            if userinfo:
+                resp = client.get(userinfo,
+                                  access_token=token.get('access_token'))
+                profile = resp.json() \
+                    if hasattr(resp, 'json') else resp
+            else:
+                # OIDC shortcut (google; microsoft when metadata-discovered)
+                profile = client.userinfo()
     except Exception as exc:                      # noqa: BLE001
         current_app.logger.warning('OAuth %s userinfo failed: %s', name, exc)
         flash(f'Could not read your {label} profile. Please try again.',

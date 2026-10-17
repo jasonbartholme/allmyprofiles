@@ -122,6 +122,80 @@
                  name="stripe_customer_portal_return" value="{{ settings.stripe_customer_portal_return }}">
           <div class="form-text">Where the Stripe customer portal sends users when they click “back to site” (default <code>/dashboard</code>).</div>
         </div>
+
+        <div class="col-12 pt-3 border-top mt-2">
+          <h3 class="h6 fw-bold mb-0"><i class="bi bi-envelope-paper me-2"></i>Email delivery (Gmail SMTP)</h3>
+          <div class="form-text mb-2">
+            Lets the site send real emails (e.g. notify profile owners when a visitor contacts them).
+            Everything keeps working with this switched <strong>off</strong> — messages stay in-app only.
+            For Gmail use an <strong>App Password</strong> from
+            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a>
+            (requires 2-Step Verification), not your normal account password.
+            Host/port can also be supplied via <code>MAIL_*</code> env vars; values saved here take precedence.
+          </div>
+        </div>
+        <div class="col-sm-3 d-flex align-items-end">
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="smtp_enabled"
+                   name="smtp_enabled" value="true"
+                   {{ 'checked' if settings.smtp_enabled in ('true', '1', 'yes', 'on') }}>
+            <label class="form-check-label" for="smtp_enabled">Enable outbound email</label>
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label" for="smtp_host">SMTP server</label>
+          <input type="text" maxlength="120" class="form-control" id="smtp_host"
+                 name="smtp_host" value="{{ settings.smtp_host }}" placeholder="smtp.gmail.com">
+        </div>
+        <div class="col-sm-2">
+          <label class="form-label" for="smtp_port">Port</label>
+          <input type="number" min="1" max="65535" class="form-control" id="smtp_port"
+                 name="smtp_port" value="{{ settings.smtp_port }}" placeholder="465">
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label" for="smtp_security">Security</label>
+          <select class="form-select" id="smtp_security" name="smtp_security">
+            {% for opt, label in (('ssl', 'SSL (port 465) — recommended for Gmail'),
+                                  ('starttls', 'STARTTLS (port 587)'),
+                                  ('none', 'None (local relay only)')) %}
+            <option value="{{ opt }}" {{ 'selected' if settings.smtp_security == opt }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="smtp_username">SMTP username (Gmail address)</label>
+          <input type="email" maxlength="190" autocomplete="off" class="form-control" id="smtp_username"
+                 name="smtp_username" value="{{ settings.smtp_username }}" placeholder="you@gmail.com">
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="smtp_password">SMTP password (App Password)</label>
+          <input type="password" maxlength="128" autocomplete="new-password" class="form-control" id="smtp_password"
+                 name="smtp_password" value=""
+                 placeholder="{{ ('Saved: ' ~ smtp_masked ~ ' — leave blank to keep') if smtp_has_password else 'Paste your 16-character App Password' }}">
+          <div class="form-text">Stored on the server; never re-displayed in full. Type a new one to replace it.</div>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="mail_from">“From” address</label>
+          <input type="email" maxlength="190" class="form-control" id="mail_from"
+                 name="mail_from" value="{{ settings.mail_from }}" placeholder="defaults to the username">
+          <div class="form-text">Gmail requires this to match the sending account (or a configured alias).</div>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label" for="mail_from_name">“From” display name</label>
+          <input type="text" maxlength="120" class="form-control" id="mail_from_name"
+                 name="mail_from_name" value="{{ settings.mail_from_name }}">
+        </div>
+        <div class="col-12 d-flex flex-wrap gap-2 align-items-center mt-1">
+          <button type="submit" name="smtp_test_save_first" value="1"
+                  formnovalidate class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+            <i class="bi bi-plug me-1"></i>Save &amp; test connection
+          </button>
+          <button type="submit" name="smtp_send_test" value="1"
+                  formnovalidate class="btn btn-outline-primary btn-sm rounded-pill px-3">
+            <i class="bi bi-send me-1"></i>Send test email to saved “From” address
+          </button>
+          <div class="form-text w-100">Test buttons validate and save the SMTP fields above before connecting — they do not touch the other site settings.</div>
+        </div>
       </div>
       <button type="submit" class="btn btn-primary rounded-pill px-4 mt-4">Save settings</button>
     </form>
