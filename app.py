@@ -40,6 +40,7 @@ from models import (db, User, Link, Setting, Activity, Message, MessageRead,
 from uploads_util import (BACKGROUND_MAX_IMAGE_DIMENSION, save_upload_image,
                           delete_upload_image)
 import catalogue_io
+import mail_util
 import stripe_billing
 from oauth_login import (oauth_bp, init_oauth, available_providers,
                          provider_display_maps)
@@ -551,8 +552,10 @@ def create_review_invitation(user, batch_id=None, sender=None,
     the rendered template copy goes through the standard inbox pipeline
     (``send_admin_message``) tagged with the ``review_invite`` category,
     so every dispatch is auditable like any other admin message on this
-    site. The platform has no external SMTP configured; the delivered
-    inbox message is the automated email-notification layer here.
+    site. The platform's external email delivery (Gmail SMTP) is configured
+    from Admin -> Settings; when it is switched on, the profile owner also
+    receives an email copy of each contact message. When it is off, the
+    delivered inbox message below is the automated notification layer here.
     Returns the ReviewInvitation row.
     """
     token = secrets.token_urlsafe(32)
@@ -2002,7 +2005,7 @@ def register_routes(app):
                                categorized_links=categorized,
                                show_contact=show_contact)
 
-    @app.route('/u/<handle>/confirm-age', methods=['POST'])
+    @app.route('/<handle>/confirm-age', methods=['POST'])
     def confirm_age(handle):
         """Age confirmation for adult-oriented profiles (18+)."""
         user = user_by_handle(handle)
@@ -2484,8 +2487,8 @@ def register_routes(app):
 - Custom: everything in Full plus early beta access and dedicated admin communication.
 
 ## Public profile format
-- Canonical URL: {base}/u/<username>
-- Machine-readable link feed: {base}/u/<username>/links.xml
+- Canonical URL: {base}/<display-name-slug>
+- Machine-readable link feed: {base}/<display-name-slug>/links.xml
 - Each profile embeds schema.org ProfilePage + Person JSON-LD with sameAs
   links to the owner's external profiles.
 """
@@ -2751,7 +2754,7 @@ CONTACT_EMAIL_RE = re.compile(r'^[^@\s]{1,60}@[^@\s.]+(\.[^@\s.]+)+$')
 
 def register_public_interaction_routes(app):
 
-    @app.route('/u/<handle>/submit-contact', methods=['POST'])
+    @app.route('/<handle>/submit-contact', methods=['POST'])
     def submit_contact(handle):
         """Profile 'Contact Me' modal -> recipient's inbox (unread)."""
         user = user_by_handle(handle)
@@ -2788,6 +2791,23 @@ def register_public_interaction_routes(app):
         db.session.add(msg)
         Activity.record('contact_received', user=user, detail=f'from {email}')
         db.session.commit()
+        # Optional Gmail/SMTP notification to the profile owner. Wrapped so a
+        # mail failure can NEVER block the message — the inbox record above
+        # is already committed and is the guaranteed delivery path.
+        if user.email and mail_util.is_configured():
+            try:
+                ok, detail = mail_util.send_email(
+                    user.email,
+                    subject=('New message on your AllMyProfiles profile'
+                             + (f': {subject}' if subject else '')),
+                    body=(f'{name} <{email}> wrote to you via your public '
+                          f'profile:\n\n{body}\n\n'
+                          'Reply from your inbox on this site.'))
+                Activity.record('contact_mail', user=user,
+                                detail=('sent' if ok else f'skipped: {detail[:120]}'))
+                db.session.commit()
+            except Exception:
+                pass  # email must never break functionality
         return render_template('contact_thanks.html')
 
     @app.route('/report', methods=['GET'])
@@ -3145,6 +3165,46 @@ def register_admin_routes(app):
                    'consent_policy_version'}
         booleans = {'country_show_unrecognized', 'cookie_banner_enabled'}
         if request.method == 'POST':
+            # --- Email delivery (SMTP) section ---------------------------
+            # Handled by mail_util so its validation/secret round-trip rules
+            # stay in one place. Validated first; a bad SMTP value aborts the
+            # whole save so nothing is half-persisted. The dedicated test
+            # buttons post here too — they don't save, just validate+report.
+            smtp_errors = mail_util.validate_form(request.form)
+            if smtp_errors:
+                for err in smtp_errors:
+                    flash(err, 'danger')
+                return redirect(url_for('admin_settings'))
+            if request.form.get('smtp_test_save_first'):
+                mail_util.save_from_form(request.form)
+                ok, detail = mail_util.test_connection()
+                Activity.record('smtp_test', actor=_real_admin(),
+                                detail=('ok' if ok else f'failed: {detail[:180]}'))
+                db.session.commit()
+                flash(('SMTP connection OK — ' if ok else 'SMTP test failed — ') + detail,
+                      'success' if ok else 'danger')
+                return redirect(url_for('admin_settings'))
+            if request.form.get('smtp_send_test'):
+                # Save the SMTP section, then send a real email to the
+                # configured "From" address (self-test; no extra field needed).
+                mail_util.save_from_form(request.form)
+                cfg = mail_util.get_smtp_config()
+                to_addr = cfg['mail_from']
+                ok, detail = mail_util.send_email(
+                    to_addr,
+                    subject='AllMyProfiles — SMTP test email',
+                    body=('This is a test message from your AllMyProfiles site.\n\n'
+                          'If you received it, your Gmail SMTP credentials are '
+                          'working and outbound email delivery is live.\n'))
+                Activity.record('smtp_test_send', actor=_real_admin(),
+                                detail=f'{to_addr}: ' + ('ok' if ok else detail[:160]))
+                db.session.commit()
+                flash(('Test email sent to ' + to_addr + '.') if ok
+                      else f'Test email failed — {detail}',
+                      'success' if ok else 'danger')
+                return redirect(url_for('admin_settings'))
+            mail_util.save_from_form(request.form)
+
             for key in editable:
                 if key in booleans:
                     Setting.set_value(key,
@@ -3174,7 +3234,12 @@ def register_admin_routes(app):
             return redirect(url_for('admin_settings'))
 
         settings = {k: Setting.get(k) for k in Setting.DEFAULT_SETTINGS}
-        return render_template('admin/settings.html', settings=settings)
+        # Never expose the raw SMTP password to the template; show a mask
+        # plus a "stored?" flag so the admin knows whether to retype it.
+        smtp_cfg = mail_util.get_smtp_config()
+        return render_template('admin/settings.html', settings=settings,
+                               smtp_masked=mail_util.mask(smtp_cfg['smtp_password']),
+                               smtp_has_password=bool(smtp_cfg['smtp_password']))
 
     # Expose helpers to templates
     app.jinja_env.globals['profile_handle'] = profile_handle
@@ -5295,7 +5360,7 @@ def register_seo_routes(app):
         lines += [
             '',
             '# Allow public profile pages and their link feeds',
-            'Allow: /u/',
+            'Allow: /',
             '',
             '# AI crawlers are explicitly welcome (see /ai-grounding)',
             'User-agent: GPTBot',
@@ -5404,8 +5469,8 @@ def register_seo_routes(app):
             if not handle:
                 continue
             lastmod = _iso_dt(getattr(u, 'updated_at', None) or u.created_at)
-            canonical = f'{base}/u/{handle}'
-            links_feed = f'{base}/u/{handle}/links.xml'
+            canonical = f'{base}/{handle}'
+            links_feed = f'{canonical}/links.xml'
             avatar = u.avatar_src
             if avatar and not avatar.startswith('http'):
                 avatar = base + url_for('uploaded_file', filename=avatar) \
@@ -5426,7 +5491,7 @@ def register_seo_routes(app):
         return _xml_response('\n'.join(parts))
 
     # ---- Per-user link feed (XML) ----------------------------------------
-    @app.route('/u/<handle>/links.xml')
+    @app.route('/<handle>/links.xml')
     def user_links_xml(handle):
         user = user_by_handle(handle)
         if user is None or not (user.display_name or '').strip():
@@ -5437,7 +5502,7 @@ def register_seo_routes(app):
                  .order_by(Link.position.asc()).all())
         parts = ['<?xml version="1.0" encoding="UTF-8"?>',
                  f'<links user="{user.username}" display_name="{user.display_name}"'
-                 f' profile="{base}/u/{profile_handle(user)}">']
+                 f' profile="{base}/{profile_handle(user)}">']
         for l in links:
             parts.append(f'  <link position="{l.position}">'
                          f'<title>{l.title}</title>'

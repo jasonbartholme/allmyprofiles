@@ -47,6 +47,20 @@ DEFAULT_SETTINGS = {
     # Cookie consent banner. Bump the version to re-ask every visitor.
     'cookie_banner_enabled': 'true',
     'consent_policy_version': '1',
+    # --- Outbound email (Gmail SMTP or any provider) ----------------------
+    # Configured from Admin -> Settings -> "Email delivery (SMTP)".
+    # Values can also be supplied via MAIL_* env vars (see mail_util.py);
+    # a saved DB value takes precedence over the env var.
+    # Gmail: host smtp.gmail.com, port 465 + security "ssl", and an APP
+    # PASSWORD (myaccount.google.com/apppasswords) — not the account password.
+    'smtp_enabled': 'false',        # master switch; off = inbox-only mode
+    'smtp_host': '',                # e.g. smtp.gmail.com
+    'smtp_port': '465',             # 465 ssl / 587 starttls / 2525 relay
+    'smtp_security': 'ssl',         # ssl | starttls | none
+    'smtp_username': '',            # full Gmail address
+    'smtp_password': '',            # App Password (masked in the admin UI)
+    'mail_from': '',                # From: address (blank = use username)
+    'mail_from_name': 'AllMyProfiles',  # From: display name
 }
 
 
