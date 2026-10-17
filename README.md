@@ -77,20 +77,36 @@ python create_admin.py --username admin --email you@example.com   # one-time
 python app.py                 # http://127.0.0.1:5000
 ```
 
-> **If `pip install` fails with "Failed building wheel for cryptography":**
-> your pip (or the one bundled in your virtualenv) is too old to pick up the
-> prebuilt binary wheels and is trying to compile Rust source instead. Fix it
-> inside your activated virtualenv before installing:
+> **If `pip install` fails with "Failed building wheel for cryptography"**
+> (and/or you then see `ModuleNotFoundError: No module named 'flask'` when
+> running the app): pip aborts the *entire* install when any package fails to
+> build, so nothing — not even Flask — gets installed. Two things cause the
+> build failure; check both:
 >
-> ```bash
-> python -m pip install --upgrade pip setuptools wheel
-> pip install -r requirements.txt
-> ```
+> 1. **Python version.** `cryptography` ships prebuilt binary wheels tagged
+>    `cp311-abi3`, which only work on **Python 3.11+**. If your venv was
+>    created with Python 3.9/3.10, pip must compile Rust source and fails
+>    without a Rust toolchain. Run `python --version` inside the activated
+>    venv. If it's older than 3.11, recreate the venv with a newer Python:
 >
-> On macOS (Intel or Apple Silicon) this always resolves to a binary wheel —
-> no Xcode/Rust toolchain needed. `cryptography` is pulled in by Authlib for
-> the OAuth providers; it is listed explicitly in `requirements.txt` so the
-> resolver prefers the wheel.
+>    ```bash
+>    brew install python@3.12          # if needed
+>    rm -rf .venv
+>    python3.12 -m venv .venv && source .venv/bin/activate
+>    ```
+>
+> 2. **Old pip.** Very old pip (<23) ignores the abi3 wheels. Inside the
+>    activated venv:
+>
+>    ```bash
+>    python -m pip install --upgrade pip setuptools wheel
+>    pip install -r requirements.txt
+>    ```
+>
+> With Python ≥ 3.11 and an upgraded pip, macOS (Intel and Apple Silicon)
+> always resolves `cryptography` to a binary wheel — no Xcode/Rust toolchain
+> needed. `cryptography` is pulled in by Authlib for the OAuth providers; it
+> is pinned `<43` in `requirements.txt` to stay on broadly-compatible wheels.
 
 Tables and default site settings are auto-created in development.
 
