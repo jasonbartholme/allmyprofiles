@@ -137,7 +137,7 @@ check('logged-in user redirected to dashboard',
 client.get('/logout')
 
 print('\n== Reserved-name alias no longer 500s ==')
-r = client.get('/u/paidstar')
+r = client.get('/paid-star')
 check('canonical profile route works', r.status_code == 200)
 r = client.get('/pricing')
 check('/pricing is 404 (reserved), not someone\u2019s profile', r.status_code == 404)

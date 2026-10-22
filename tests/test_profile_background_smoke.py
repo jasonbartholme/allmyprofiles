@@ -94,7 +94,7 @@ with app.app_context():
           User.query.filter_by(username='paidbackground').first().background_path
           == background_path)
 
-public_profile = client.get('/u/paidbackground').get_data(as_text=True)
+public_profile = client.get('/paid-background').get_data(as_text=True)
 check('paid public profile renders custom background',
       background_path in public_profile and 'background-image:' in public_profile)
 
@@ -116,7 +116,7 @@ with app.app_context():
     free.background_path = background_path
     db.session.commit()
 
-free_profile = client.get('/u/freebackground').get_data(as_text=True)
+free_profile = client.get('/free-background').get_data(as_text=True)
 check('free public profile does not render stored background',
       background_path not in free_profile)
 

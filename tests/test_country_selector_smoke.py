@@ -70,9 +70,11 @@ with app.app_context():
           (user.country_code, user.country_name, user.location)
           == ('CA', 'Canada', 'Canada'))
 
-profile = client.get('/u/countryuser').get_data(as_text=True)
+profile = client.get('/country-user').get_data(as_text=True)
 check('public profile displays the country label',
       'Canada' in profile and 'addressCountry' in profile)
+check('profile schema URL uses the bare display-name path',
+    '"url": "http://localhost/country-user"' in profile)
 
 directory = client.get(f'/directory/{source_slug_value}').get_data(as_text=True)
 check('directory card displays the country flag',

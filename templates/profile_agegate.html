@@ -4,7 +4,7 @@
 {% block robots_meta %}<meta name="robots" content="noindex, nofollow">{% endblock %}
 
 {% block head %}
-<link rel="canonical" href="{{ request.url_root.rstrip('/') }}/u/{{ user.username }}">
+<link rel="canonical" href="{{ request.base_url }}">
 <style>
   .agegate-card { max-width: 480px; margin: 12vh auto; }
 </style>
@@ -22,7 +22,7 @@
     </p>
     <p class="small text-muted">By continuing you confirm that you are at least
       18 years old (or the age of majority where you live).</p>
-    <form method="post" action="{{ url_for('confirm_age', handle=user.username) }}"
+    <form method="post" action="{{ request.path }}/confirm-age"
           class="d-grid gap-2 mt-3">
       <button type="submit" name="confirm" value="yes" class="btn btn-primary btn-lg">
         I am 18 or older — continue

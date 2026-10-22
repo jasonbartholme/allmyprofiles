@@ -45,7 +45,7 @@
 
   <h2 class="h4 fw-bold mb-2">What this product does</h2>
   <p>{{ site_name }} is a link-in-bio and personal-brand hosting platform. A user claims one unique
-  username (for example <code>{{ base }}/u/yourname</code>) and receives a fast, mobile-first page that
+  public profile path (for example <code>{{ base }}/yourname</code>) and receives a fast, mobile-first page that
   lists every profile, channel, storefront, article, or destination they own — in one place. The product
   is built so those pages rank well on Google and parse cleanly for AI answer engines such as ChatGPT,
   Perplexity, and Claude.</p>
@@ -111,7 +111,7 @@
   <h2 class="h4 fw-bold mt-4 mb-2">Example public profiles</h2>
   <ul>
     {% for u in featured %}
-    <li><a href="{{ base }}/u/{{ u.username }}">{{ base }}/u/{{ u.username }}</a>
+    <li><a href="{{ base }}{{ profile_url(u) }}">{{ base }}{{ profile_url(u) }}</a>
       — {{ u.display_name }}{% if u.headline %}: {{ u.headline }}{% endif %}</li>
     {% endfor %}
   </ul>

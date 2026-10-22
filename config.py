@@ -18,7 +18,7 @@ import os
 def _normalize_db_url(url):
     # Some platforms (e.g. older Heroku buildpacks) hand out "postgres://"
     # which SQLAlchemy < 2.x does not recognize.
-    if url.startswith('postgres://'):
+    if url and url.startswith('postgres://'):
         return url.replace('postgres://', 'postgresql://', 1)
     return url
 
@@ -101,11 +101,9 @@ class ProductionConfig(Config):
 
     # Class attribute on purpose: Flask's from_object() reads the class, not an
     # instance, so setting this in __init__ left it undefined.
-    #
-    # SECURITY: no hardcoded credentials fallback. DATABASE_URL must be
-    # exported (the WSGI file sets it). A literal password here would leak
-    # through git history and any traceback/env dump.
-    SQLALCHEMY_DATABASE_URI = _normalize_db_url(os.environ['DATABASE_URL'])
+    # No hardcoded fallback: credentials must come from DATABASE_URL, e.g.
+    # postgresql+psycopg://USER:URL_ENCODED_PASSWORD@HOST:5432/DBNAME
+    SQLALCHEMY_DATABASE_URI = _normalize_db_url(os.environ.get('DATABASE_URL'))
 
 
 class TestingConfig(Config):

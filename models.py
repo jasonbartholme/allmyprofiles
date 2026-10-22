@@ -129,7 +129,7 @@ class User(UserMixin, db.Model):
 
     # Profile customization fields
     # Display Name doubles as the public profile handle: the SEO-friendly
-    # URL is /u/<display-name-slug>, so it must be provided at signup and
+    # URL is /<display-name-slug>, so it must be provided to create a public profile and
     # be unique across all claimed display names (case-insensitive).
     display_name = db.Column(db.String(120), nullable=True, unique=True,
                              index=True)
@@ -206,7 +206,7 @@ class User(UserMixin, db.Model):
     directory_visible = db.Column(db.Boolean, default=False, nullable=False,
                                   server_default='0')
     # Set once a logged-in user passes the 18+ age gate (see /directory and
-    # /u/<username>/confirm-age). Remembers verification per account so the
+    # profile's /<handle>/confirm-age route). Remembers verification per account so the
     # gate is not re-shown on every device session; the session flag
     # ``age_ok`` remains the short-lived, cookie-based equivalent.
     age_verified = db.Column(db.Boolean, default=False, nullable=False,
@@ -234,7 +234,7 @@ class User(UserMixin, db.Model):
         asserts "I am 18 or older" (see ``templates/register.html``), so new
         accounts are verified from signup onwards; legacy accounts flip the
         flag via the one-time age gate (/directory/age-gate,
-        /u/<username>/confirm-age). Admins bypass it so they can QA the
+        profile's /<handle>/confirm-age route). Admins bypass it so they can QA the
         catalogue.
         """
         return bool(self.is_admin or self.age_verified)
@@ -1820,9 +1820,9 @@ DEFAULT_FAQS = [
     # category, question, answer (plain text; blank line = new paragraph)
     ('Plans & Billing', 'Can I use my own domain name?',
      'Yes — custom domains are available on the Custom plan. Point your '
-     'domain\'s DNS at us and we\'ll serve your profile page with SSL '
-     'automatically. On lower plans you get a clean canonical URL like '
-     '/u/yourname.'),
+    'domain\'s DNS at us and we\'ll serve your profile page with SSL '
+    'automatically. On lower plans you get a clean canonical URL like '
+    '/yourname.'),
     ('Links & Analytics',
      'How do I add my Google Analytics or Meta tracking pixel?',
      'On the Full and Custom plans, open the Dashboard → Integrations '

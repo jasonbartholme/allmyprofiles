@@ -127,8 +127,6 @@
               <span class="text-muted">
                 {% if l.endpoint == 'public_profile' %}
                   /{{ handle }}
-                {% elif l.endpoint == 'public_profile_alias' %}
-                  /u/{{ handle }} (legacy)
                 {% else %}
                   {{ l.endpoint }}
                 {% endif %}

@@ -414,9 +414,8 @@ Admin → Site settings, they are also emailed to the recipient),
 reports → admin moderation queue). Reserved usernames (e.g. `admin`,
 `help`, `api`) are blocked at registration and in the availability API.
 
-> **Note:** public profiles are served at bare `/<username>` (the older
-> `/u/<username>` prefix was removed); sitemaps, feeds and canonical URLs
-> all use the new form.
+> **Note:** public profiles are served at a bare `/<display-name-slug>` path;
+> sitemaps, feeds and canonical URLs all use this form.
 
 ## Admin messaging & user inbox
 
