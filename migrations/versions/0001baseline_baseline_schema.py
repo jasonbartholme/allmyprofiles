@@ -884,7 +884,7 @@ SEED_DATA = {'link_categories': [{'id': 1,
            'question': 'Can I use my own domain name?',
            'answer': "Yes — custom domains are available on the Custom plan. Point your domain's "
                      "DNS at us and we'll serve your profile page with SSL automatically. On lower "
-                     'plans you get a clean canonical URL like /u/yourname.',
+                     'plans you get a clean canonical URL like /yourname.',
            'category_id': 2,
            'sort_order': 0,
            'is_published': 1,

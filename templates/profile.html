@@ -35,7 +35,7 @@
       "addressLocality": "{{ user.location }}"
     },{% endif %}
     "image": "{{ user.avatar_src }}",
-    "url": "{{ request.url_root.rstrip('/') }}/u/{{ user.username }}"
+    "url": "{{ request.base_url }}"
     {% if links %},
     "sameAs": [{% for link in links %}"{{ link.url }}"{% if not loop.last %}, {% endif %}{% endfor %}]
     {% endif %}

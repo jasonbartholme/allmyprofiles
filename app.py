@@ -267,7 +267,7 @@ def admin_required(view):
 # ----------------------------------------------------------------------
 
 #: Public profile endpoints whose traffic users get a per-profile view of.
-FMD_PROFILE_ENDPOINTS = ('public_profile', 'public_profile_alias')
+FMD_PROFILE_ENDPOINTS = ('public_profile',)
 
 
 def _fmd_enabled():
@@ -444,7 +444,7 @@ def fmd_profile_stats(handle):
     """Traffic stats for ONE public profile handle, straight from FMD.
 
     Hardwired filters (the tenant boundary):
-      * Endpoint.name IN ('public_profile', 'public_profile_alias') — only
+    * Endpoint.name == 'public_profile' — only
         hits on /<handle> pages count;
       * Request.group_by == handle — only rows attributed to THIS profile
         (see _fmd_group_by); no other handle can match.
@@ -675,8 +675,7 @@ def group_links_for_profile(links):
 def profile_handle(user):
     """Public URL handle for a profile — always derived from the Display Name.
 
-    The canonical profile URL is ``/<display-name-slug>`` (no /u/ prefix —
-    cleaner and more search-engine friendly). Email addresses and raw
+    The canonical profile URL is ``/<display-name-slug>``. Email addresses and raw
     usernames are never used in public URLs; an account without a Display
     Name has no public profile at all (callers should 404). Falls back to
     the legacy username only for accounts that predate the Display-Name
@@ -2299,8 +2298,8 @@ def register_routes(app):
     # Public Facing Profile & Analytics
     # ==========================================
 
-    # Canonical public profile URL is the bare /<display-name-slug> — no
-    # /u/ prefix. Cleaner, more search-engine friendly, and every system /
+    # Canonical public profile URL is the bare /<display-name-slug>.
+    # Every system /
     # application route registered on the app takes priority over it (the
     # catch-all rule below is matched last by Werkzeug, and reserved first
     # segments are rejected outright in user_by_handle()).
@@ -2755,14 +2754,6 @@ def register_routes(app):
             country=country,
             include_adult=include_adult,
         )
-
-    # Convenience alias so bare /<username> also works (kept last so it
-    # never shadows the routes above).
-    @app.route('/<handle>')
-    def public_profile_alias(handle):
-        if handle.lower() in RESERVED_USERNAMES:
-            abort(404)
-        return public_profile(handle)
 
     # ------------------------------------------------------------------
     # AI grounding page — machine-readable facts about this site for
@@ -5898,7 +5889,7 @@ def register_template_context(app):
         # Public, marketing, and profile pages are indexable even when the
         # viewer happens to be logged in. Everything behind auth (dashboard,
         # inbox, admin) is noindex,nofollow so bots never see private state.
-        PUBLIC_INDEXABLE = {'home', 'public_profile', 'public_profile_alias',
+        PUBLIC_INDEXABLE = {'home', 'public_profile',
                             'help_center', 'faq_page', 'contact', 'terms',
                             'privacy',
                             'ai_grounding', 'directory', 'directory_source',
