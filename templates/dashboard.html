@@ -459,6 +459,62 @@
         <div class="display-5 fw-bold text-primary">{{ total_clicks }}</div>
         <p class="text-muted small mb-0">Across all of your links</p>
       </div>
+
+      {# ===== Profile traffic (Flask-MonitoringDashboard, this handle only) =====
+         The numbers come from fmd_profile_stats(profile_handle(current_user)):
+         the tenant filter is baked into the server-side query, so whatever
+         renders here can ONLY ever be your own /<handle> page traffic. #}
+      {% if profile_traffic %}
+      {% set pt_days = profile_traffic.days %}
+      {% set pt_max = pt_days | map(attribute='views') | max %}
+      <div class="card p-4 mt-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <h5 class="fw-bold mb-0"><i class="bi bi-diagram-3 me-2"></i>Profile traffic</h5>
+          <a class="btn btn-sm btn-outline-primary rounded-pill" rel="nofollow"
+             href="{{ url_for('profile_analytics') }}">
+            <i class="bi bi-bar-chart-line me-1"></i>Full analytics
+          </a>
+        </div>
+        <div class="row g-3 mb-3 text-center">
+          <div class="col-6 col-md-3">
+            <div class="fw-bold fs-4">{{ profile_traffic.totals.views }}</div>
+            <div class="text-muted small">Page views</div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="fw-bold fs-4">{{ profile_traffic.totals.unique_visitors }}</div>
+            <div class="text-muted small">Unique visitors</div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="fw-bold fs-4">{{ '%.1f' | format(profile_traffic.totals.avg_ms) }} ms</div>
+            <div class="text-muted small">Avg. load time</div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="fw-bold fs-4">{{ profile_traffic.totals.last_seen.strftime('%b %d') if profile_traffic.totals.last_seen else '—' }}</div>
+            <div class="text-muted small">Last visit</div>
+          </div>
+        </div>
+        <div class="d-flex align-items-end gap-1 overflow-auto pb-1"
+             style="height: 96px;" role="img"
+             aria-label="Daily page views for your profile over the last {{ days }} days">
+          {% for d in pt_days %}
+          <div class="flex-fill rounded-top bg-primary opacity-75"
+               style="min-width: 8px; height: {{ (100 * d.views // pt_max) if pt_max else 0 }}%;"
+               title="{{ d.date.isoformat() }} — {{ d.views }} view{{ '' if d.views == 1 else 's' }}"></div>
+          {% endfor %}
+        </div>
+        <p class="text-muted small mb-0 mt-2">
+          Hits on <a href="{{ profile_url(current_user) }}" target="_blank" rel="noopener">{{ profile_url(current_user) }}</a>
+          · last {{ days }} days · UTC days
+        </p>
+      </div>
+      {% elif fmd_enabled %}
+      <div class="card p-4 mt-4 text-center text-muted">
+        <i class="bi bi-graph-up-arrow fs-3"></i>
+        <p class="mb-0 mt-2 small">No profile views recorded yet — traffic charts
+          appear once visitors reach <strong>{{ profile_url(current_user) or 'your public profile' }}</strong>.
+          <a href="{{ url_for('profile_analytics') }}">Open analytics</a></p>
+      </div>
+      {% endif %}
     </div>
   </div>
 </div>

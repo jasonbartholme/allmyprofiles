@@ -37,6 +37,7 @@ from models import (db, User, Link, Setting, Activity, Message, MessageRead,
                     REPORT_REASONS, REPORT_STATUSES, CONTACT_STATUSES,
                     LINK_CATEGORIES, MESSAGE_CATEGORIES, MESSAGE_SEVERITIES,
                     PAID_TIERS, HEX_COLOR_RE)
+import flask_monitoringdashboard as fmd
 from uploads_util import (BACKGROUND_MAX_IMAGE_DIMENSION, save_upload_image,
                           delete_upload_image)
 import catalogue_io
@@ -249,6 +250,277 @@ def admin_required(view):
             abort(403)
         return view(*args, **kwargs)
     return wrapped
+
+
+# ----------------------------------------------------------------------
+# Flask-MonitoringDashboard (FMD) integration — profile traffic analytics
+#
+# FMD auto-monitors every endpoint of this app (including the public
+# profile route ``/<handle>``) and serves its own charts UI at /fmd.
+# The pieces below adapt it to a multi-tenant link-in-bio SaaS:
+#   * group_by  -> records which *profile* each hit belongs to, so the
+#                  "Users" tab of an endpoint page becomes a per-profile
+#                  traffic breakdown;
+#   * auth     -> replaces FMD's built-in admin/admin login with our own
+#                  Flask-Login session check (site admins only);
+#   * binding  -> opt-in via env var, isolated metrics DB, telemetry off.
+# ----------------------------------------------------------------------
+
+#: Public profile endpoints whose traffic users get a per-profile view of.
+FMD_PROFILE_ENDPOINTS = ('public_profile', 'public_profile_alias')
+
+
+def _fmd_enabled():
+    """Feature flag: set FMD_ENABLED=1 to turn traffic monitoring on.
+
+    Off by default so existing dev/test environments (which reuse the
+    Flask session dict) are unaffected until the package is deployed.
+    """
+    return os.environ.get('FMD_ENABLED', '').lower() in ('1', 'true', 'yes', 'on')
+
+
+def _fmd_current_handle():
+    """Profile handle being served by the current request, or None.
+
+    Prefers the URL variable Werkzeug already matched; falls back to
+    looking the user up directly (covers aliases/edge cases).
+    """
+    handle = (request.view_args or {}).get('handle')
+    if handle:
+        return handle
+    path = (request.path or '/').strip('/')
+    if '/' not in path and path:
+        u = User.query.filter(db.func.lower(User.username) == path.lower()).first()
+        if u is not None:
+            return profile_handle(u) or None
+    return None
+
+
+def _fmd_group_by():
+    """Value stored in FMD's Request.group_by column for each hit.
+
+    For public profile hits we store the profile handle itself, which
+    turns FMD's per-"user" charts into per-profile traffic charts.
+    Everything else is grouped by the logged-in account (anonymous
+    visitors share one bucket). NOTE: FMD truncates this field to 100
+    characters.
+    """
+    if request.endpoint in FMD_PROFILE_ENDPOINTS:
+        return _fmd_current_handle() or 'unknown'
+    uid = session.get('_user_id')          # Flask-Login's session key
+    return f'user:{uid}' if uid else 'anonymous'
+
+
+def _fmd_configure(app):
+    """Apply FMD's module-level config BEFORE bind() registers routes.
+
+    Important: flask_monitoringdashboard.config is a process-global
+    singleton — these settings must be applied before any other code
+    calls bind(), otherwise tables are created with stale values.
+    """
+    # Metrics live in their OWN database file so they never touch the
+    # app's SQLAlchemy models/migrations. Env-overridable for prod hosts
+    # that want e.g. a dedicated Postgres schema.
+    fmd.config.database_name = os.environ.get(
+        'FMD_DATABASE_URL', 'sqlite:///flask_monitoringdashboard.db')
+    # Serve the charts UI at /fmd — NOT the default /dashboard, which is
+    # already taken by the user dashboard route.
+    fmd.config.link = os.environ.get('FMD_LINK', 'fmd')
+    fmd.config.blueprint_name = 'fmd_dashboard'
+    fmd.config.version = os.environ.get('FMD_APP_VERSION', '1.0')
+    # monitor_level 1 = response time + status codes per endpoint (cheap).
+    # Level 2+ adds outlier stack-trace profiling; raise it if you want
+    # deeper diagnostics.
+    fmd.config.monitor_level = int(os.environ.get('FMD_MONITOR_LEVEL', '1'))
+    # Per-profile attribution (see _fmd_group_by).
+    fmd.config.group_by = _fmd_group_by
+    # Correct client IP behind a reverse proxy (Render/Railway/heroku-style).
+    # In FMD 5.x inject_dependencies lives on the config singleton itself.
+    fmd.config.inject_dependencies(get_ip=lambda: (
+        request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+        or request.remote_addr or '127.0.0.1'))
+    # Keep the brand honest in the embedded UI.
+    fmd.config.brand_name = 'AllMyProfiles Traffic Monitor'
+    fmd.config.title_name = 'Traffic Dashboard — AllMyProfiles'
+    # FMD ships with an admin/admin basic-auth login; we replace it with
+    # our own Flask-Login gate instead (see _fmd_bind).
+    fmd.config.show_login_banner = False
+    fmd.config.show_login_footer = False
+
+
+def _fmd_secure(func):
+    """Gate for all FMD views: signed-in SITE ADMIN using our session.
+
+    This deliberately bypasses FMD's own username/password system — the
+    admin sees the full, UNFILTERED view (every profile, every visitor,
+    every endpoint) without ever logging into a second dashboard.
+    Impersonating admins are locked out, mirroring admin_required.
+    """
+    from functools import wraps
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not (current_user.is_authenticated and current_user.is_admin
+                and IMPERSONATION_KEY not in session):
+            # Send them through the normal app login first.
+            return redirect(url_for('login', next=url_for(request.endpoint)))
+        return func(*args, **kwargs)
+    return wrapper
+
+
+def _fmd_bind(app, schedule=True):
+    """Bind FMD to the app and take ownership of its blueprint's auth.
+
+    FMD decorates every non-login route with its own ``secure`` (and some
+    with ``admin_secure``) at import time. We swap those two functions in
+    the module namespace BEFORE bind() imports the views, so every route
+    gets registered against OUR admin gate instead.
+    """
+    import flask_monitoringdashboard.core.auth as fmd_auth
+    fmd_auth.secure = _fmd_secure
+    fmd_auth.admin_secure = _fmd_secure
+    # FMD's blueprint is a module-level singleton. If a previous bind()
+    # already registered it on another app (e.g. tests calling
+    # create_app() twice in one process), Flask refuses any further
+    # setup hooks — reset its registration state so re-binding works.
+    if getattr(fmd.blueprint, '_got_registered_once', False):
+        fmd.blueprint._got_registered_once = set()
+    fmd.bind(app, schedule=schedule)
+    # Belt & braces: enforce the gate at dispatch time too, in case a
+    # future FMD release adds unauthenticated routes. Login/logout stay
+    # open so FMD's own pages don't error while redirecting. Registered
+    # on the APP (not the blueprint): FMD's bind() has already registered
+    # the blueprint by this point, and Flask forbids new blueprint setup
+    # hooks after first registration. The request.blueprint check below
+    # scopes it to FMD's views only.
+    exempt = {'.login', '.logout', '.static'}
+
+    @app.before_request
+    def _fmd_gate():
+        if request.blueprint != fmd.config.blueprint_name:
+            return None
+        if any(request.endpoint.endswith(sfx) for sfx in exempt):
+            return None
+        if not (current_user.is_authenticated and current_user.is_admin
+                and IMPERSONATION_KEY not in session):
+            return redirect(url_for('login', next=request.url))
+        return None
+
+
+# ----------------------------------------------------------------------
+# Per-profile traffic charts for the USER dashboard (read-only slice of
+# FMD's metrics database).
+#
+# Security model: every query below is keyed on a handle derived ONLY from
+# ``profile_handle(current_user)`` — never from the URL or any request
+# input. The WHERE clause pins FMD's Request.group_by column to that exact
+# handle AND restricts rows to the public-profile endpoints, so a user can
+# structurally never see another profile's (or the site's) traffic, even
+# by crafting requests. Admins get the full unfiltered view at /fmd; users
+# only ever get this server-aggregated panel.
+# ----------------------------------------------------------------------
+
+#: Days covered by the user-facing "Profile traffic" chart.
+FMD_CHART_DAYS = 30
+
+
+def _fmd_session():
+    """Short-lived session against FMD's isolated metrics DB.
+
+    Returns None when monitoring is off (package import failed or the
+    FMD_ENABLED flag is unset), so callers degrade gracefully instead of
+    erroring. The engine/tables are created by FMD itself at import time.
+    """
+    if not _fmd_enabled():
+        return None
+    try:
+        from flask_monitoringdashboard.database import session_scope
+    except Exception:
+        return None
+    return session_scope()
+
+
+def fmd_profile_stats(handle):
+    """Traffic stats for ONE public profile handle, straight from FMD.
+
+    Hardwired filters (the tenant boundary):
+      * Endpoint.name IN ('public_profile', 'public_profile_alias') — only
+        hits on /<handle> pages count;
+      * Request.group_by == handle — only rows attributed to THIS profile
+        (see _fmd_group_by); no other handle can match.
+    Timestamps are stored tz-aware UTC (FMD utc_now); we convert to naive
+    UTC so the buckets line up with the midnight-UTC window below.
+
+    Returns None when monitoring is disabled; otherwise a dict:
+      totals {views, unique_days, avg_ms, first_seen, last_seen},
+      days   [{'date': date, 'views': int} for the recent window],
+      links  [{'endpoint': name, 'views': int}] newest-first breakdown.
+    """
+    sess = _fmd_session()
+    if sess is None or not handle:
+        return None
+    from sqlalchemy import and_, case, distinct
+    from flask_monitoringdashboard.database import Endpoint, Request
+    with sess as s:
+        base = (and_(Request.endpoint_id == Endpoint.id,
+                     Endpoint.name.in_(FMD_PROFILE_ENDPOINTS),
+                     Request.group_by == handle))
+        row = (s.query(
+                  func.count(Request.id),
+                  func.avg(Request.duration),
+                  func.min(Request.time_requested),
+                  func.max(Request.time_requested),
+                  func.count(distinct(case((Request.status_code < 400,
+                                             Request.ip)))),
+              )
+              .select_from(Request)
+              .join(Endpoint, Request.endpoint_id == Endpoint.id)
+              .filter(base).one())
+        views = int(row[0] or 0)
+        # Recent daily buckets (naive UTC dates; missing days render as 0).
+        since = datetime.utcnow() - timedelta(days=FMD_CHART_DAYS)
+        day_rows = (s.query(func.date(Request.time_requested),
+                           func.count(Request.id))
+                    .select_from(Request)
+                    .join(Endpoint, Request.endpoint_id == Endpoint.id)
+                    .filter(base, Request.time_requested >= since)
+                    .group_by(func.date(Request.time_requested)).all())
+        # Per-endpoint split (canonical page vs. legacy alias).
+        link_rows = (s.query(Endpoint.name, func.count(Request.id))
+                     .select_from(Request)
+                     .join(Endpoint, Request.endpoint_id == Endpoint.id)
+                     .filter(base)
+                     .group_by(Endpoint.name)
+                     .order_by(func.count(Request.id).desc()).all())
+
+    counts = {}
+    for d, n in day_rows:
+        if d is None:
+            continue
+        try:
+            counts[str(d)] = int(n)
+        except (TypeError, ValueError):
+            continue
+    days = []
+    today = datetime.utcnow().date()
+    for i in range(FMD_CHART_DAYS - 1, -1, -1):
+        d = today - timedelta(days=i)
+        days.append({'date': d, 'views': counts.get(str(d), 0)})
+
+    def _as_naive(dt):
+        return dt.replace(tzinfo=None) if dt is not None and dt.tzinfo else dt
+
+    return {
+        'totals': {
+            'views': views,
+            'unique_visitors': int(row[4] or 0),
+            'avg_ms': float(row[1]) if row[1] is not None else 0.0,
+            'first_seen': _as_naive(row[2]),
+            'last_seen': _as_naive(row[3]),
+        },
+        'days': days,
+        'links': [{'endpoint': name, 'views': int(n)} for name, n in link_rows],
+    }
 
 
 # ----------------------------------------------------------------------
@@ -684,6 +956,19 @@ def create_app(config_name=None):
             backfill_country_fields()
 
     register_routes(app)
+
+    # ------------------------------------------------------------------
+    # Flask-MonitoringDashboard: automatic per-endpoint traffic + latency
+    # monitoring, charts UI at /fmd (site admins only — see _fmd_bind).
+    # Opt-in via FMD_ENABLED=1; schedule=False keeps the APScheduler
+    # background thread off (we don't use custom graphs yet, and tests
+    # shouldn't spawn threads). Bind AFTER routes exist so FMD can wrap
+    # the view functions, but BEFORE the first request is served.
+    # ------------------------------------------------------------------
+    if _fmd_enabled():
+        _fmd_configure(app)
+        _fmd_bind(app, schedule=False)
+
     register_static_pages(app)
     register_seo_routes(app)
     register_inbox_routes(app)
@@ -1858,8 +2143,25 @@ def register_routes(app):
         user_links = (Link.query.filter_by(user_id=current_user.id)
                       .order_by(Link.position.asc()).all())
         total_clicks = sum(link.click_count or 0 for link in user_links)
+        # Per-profile traffic panel: read-only slice of FMD's metrics DB,
+        # hardwired server-side to THIS user's handle (see fmd_profile_stats).
+        profile_traffic = None
+        if _fmd_enabled():
+            try:
+                profile_traffic = fmd_profile_stats(profile_handle(current_user))
+            except Exception:
+                app.logger.exception('FMD stats query failed')
+                profile_traffic = None
         return render_template('dashboard.html', links=user_links,
                                total_clicks=total_clicks,
+                               profile_traffic=profile_traffic,
+                               fmd_enabled=_fmd_enabled(),
+                               days=FMD_CHART_DAYS,
+                               # NOTE: do NOT pass a ``profile_url`` render
+                               # kwarg here — base.html calls the
+                               # ``profile_url`` Jinja GLOBAL (the
+                               # url_for_profile callable). A string kwarg
+                               # would shadow it and crash the template.
                                max_upload_kb=Setting.get_int('max_upload_size_kb', 2048),
                                paid_tiers=PAID_TIERS,
                                country_choices=country_choices(),
@@ -1966,6 +2268,32 @@ def register_routes(app):
         db.session.commit()
         flash('Link removed.', 'info')
         return redirect(url_for('dashboard'))
+
+    @app.route('/analytics')
+    @login_required
+    def profile_analytics():
+        """Per-profile traffic page — THIS user's /<handle> page only.
+
+        There is deliberately no handle/username parameter anywhere on this
+        route: the tenant key comes from ``profile_handle(current_user)``,
+        and fmd_profile_stats() hardwires that value into the WHERE clause
+        of every query against FMD's metrics DB. Users cannot browse other
+        profiles' analytics even by crafting URLs — the full multi-profile
+        view lives at /fmd (site admins only).
+        """
+        stats = None
+        if _fmd_enabled():
+            my_handle = profile_handle(current_user)
+            if my_handle:
+                try:
+                    stats = fmd_profile_stats(my_handle)
+                except Exception:
+                    app.logger.exception('FMD stats query failed')
+                    stats = None
+        return render_template('analytics.html', stats=stats,
+                               handle=my_handle if _fmd_enabled() else '',
+                               days=FMD_CHART_DAYS,
+                               profile_url=url_for_profile(current_user))
 
     # ==========================================
     # Public Facing Profile & Analytics

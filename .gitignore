@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 instance/*.db
+
+# Flask-MonitoringDashboard metrics DB (default sqlite location)
+flask_monitoringdashboard.db
