@@ -101,10 +101,11 @@ class ProductionConfig(Config):
 
     # Class attribute on purpose: Flask's from_object() reads the class, not an
     # instance, so setting this in __init__ left it undefined.
-    SQLALCHEMY_DATABASE_URI = _normalize_db_url(os.environ.get(
-        'DATABASE_URL',
-        'postgresql+psycopg:/super:AnnyongHaseyo20!@super.postgres.pythonanywhere.com:5432/allmyprofiles',
-    ))
+    #
+    # SECURITY: no hardcoded credentials fallback. DATABASE_URL must be
+    # exported (the WSGI file sets it). A literal password here would leak
+    # through git history and any traceback/env dump.
+    SQLALCHEMY_DATABASE_URI = _normalize_db_url(os.environ['DATABASE_URL'])
 
 
 class TestingConfig(Config):

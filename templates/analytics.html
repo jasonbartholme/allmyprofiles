@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{#
+  Per-profile traffic analytics — a read-only slice of Flask-MonitoringDashboard.
+
+  TENANT ISOLATION: this page renders ONLY the stats dict produced by
+  fmd_profile_stats(profile_handle(current_user)) in app.py. The handle is
+  derived server-side from the logged-in user; there is no URL/form parameter
+  that selects a profile, and every SQL query pins FMD's Request.group_by to
+  that exact handle AND restricts rows to the public-profile endpoints. A user
+  structurally cannot see anyone else's data here. The full unfiltered view
+  lives at /fmd (site admins only).
+#}
+{% block title %}Profile analytics — AllMyProfiles{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-2">
+    <div>
+      <h1 class="h3 fw-bold mb-1">
+        <i class="bi bi-bar-chart-line me-2"></i>Profile analytics
+      </h1>
+      {% if handle %}
+      <p class="text-muted mb-0 small">
+        Traffic for <a href="{{ profile_url }}" target="_blank" rel="noopener">
+        allmyprofiles.com/{{ handle }}</a> — last {{ days }} days shown.
+      </p>
+      {% endif %}
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard') }}">
+      <i class="bi bi-arrow-left me-1"></i>Back to dashboard
+    </a>
+  </div>
+
+  {% if stats is none %}
+    {# Monitoring disabled (FMD_ENABLED unset) or no handle yet. #}
+    <div class="alert alert-info">
+      Analytics are not available right now. Traffic monitoring is enabled
+      site-wide by the operator; once it is on, your profile views will appear here.
+    </div>
+  {% else %}
+    {# ===== Totals cards ===== #}
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-lg-3">
+        <div class="card h-100"><div class="card-body">
+          <div class="text-muted small">Views</div>
+          <div class="fw-bold fs-3">{{ stats.totals.views }}</div>
+        </div></div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card h-100"><div class="card-body">
+          <div class="text-muted small">Unique visitors</div>
+          <div class="fw-bold fs-3">{{ stats.totals.unique_visitors }}</div>
+        </div></div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card h-100"><div class="card-body">
+          <div class="text-muted small">Avg. load time</div>
+          <div class="fw-bold fs-3">{{ '%.1f' | format(stats.totals.avg_ms) }} ms</div>
+        </div></div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card h-100"><div class="card-body">
+          <div class="text-muted small">Last view</div>
+          <div class="fw-bold fs-3">
+            {{ stats.totals.last_seen.strftime('%b %d') if stats.totals.last_seen else '—' }}
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="row g-4">
+      {# ===== Daily chart (inline SVG — no JS dependency) ===== #}
+      <div class="col-lg-8">
+        <div class="card h-100">
+          <div class="card-header fw-semibold">Daily views</div>
+          <div class="card-body">
+            {% set max_views = stats.days | map(attribute='views') | max %}
+            {% if max_views %}
+              {% set bar_w = 100 / (stats.days | length) %}
+              <svg viewBox="0 0 100 40" preserveAspectRatio="none"
+                   class="w-100" style="height:180px" role="img"
+                   aria-label="Daily profile views over the last {{ days }} days">
+                {% for d in stats.days %}
+                  {% set h = (d.views / max_views * 36) | round(2) %}
+                  <rect x="{{ (loop.index0 * bar_w) | round(2) }}"
+                        y="{{ (38 - h) | round(2) }}"
+                        width="{{ (bar_w * 0.7) | round(2) }}" height="{{ h }}"
+                        rx="0.5" fill="#0d6efd" opacity="0.85">
+                    <title>{{ d.date }} — {{ d.views }} view{{ '' if d.views == 1 else 's' }}</title>
+                  </rect>
+                {% endfor %}
+              </svg>
+              <div class="d-flex justify-content-between text-muted small mt-2">
+                <span>{{ stats.days[0].date.strftime('%b %d') }}</span>
+                <span>Peak: {{ max_views }}/day</span>
+                <span>{{ stats.days[-1].date.strftime('%b %d') }}</span>
+              </div>
+            {% else %}
+              <p class="text-muted mb-0">No views recorded in the last {{ days }} days.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      {# ===== Side panel: first seen + endpoint breakdown ===== #}
+      <div class="col-lg-4">
+        <div class="card mb-3">
+          <div class="card-header fw-semibold">History</div>
+          <ul class="list-group list-group-flush">
+            <li class="list-group-item d-flex justify-content-between">
+              <span class="text-muted">First view</span>
+              <span>{{ stats.totals.first_seen.strftime('%b %d, %Y') if stats.totals.first_seen else '—' }}</span>
+            </li>
+            <li class="list-group-item d-flex justify-content-between">
+              <span class="text-muted">Most recent</span>
+              <span>{{ stats.totals.last_seen.strftime('%b %d, %Y %H:%M') if stats.totals.last_seen else '—' }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-header fw-semibold">Views by page variant</div>
+          {% if stats.links %}
+          <ul class="list-group list-group-flush">
+            {% for l in stats.links %}
+            <li class="list-group-item d-flex justify-content-between">
+              <span class="text-muted">
+                {% if l.endpoint == 'public_profile' %}
+                  /{{ handle }}
+                {% elif l.endpoint == 'public_profile_alias' %}
+                  /u/{{ handle }} (legacy)
+                {% else %}
+                  {{ l.endpoint }}
+                {% endif %}
+              </span>
+              <span class="fw-semibold">{{ l.views }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <div class="card-body text-muted small">No breakdown available yet.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <p class="text-muted small mt-3 mb-0">
+      <i class="bi bi-shield-lock me-1"></i>
+      These numbers cover only your own public profile page. Other profiles'
+      traffic is never included in this view.
+    </p>
+  {% endif %}
+</div>
+{% endblock %}
