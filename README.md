@@ -148,11 +148,25 @@ account password.
 
 ## Running in production (PostgreSQL)
 
+`ProductionConfig` has **no hardcoded fallback** for `DATABASE_URL` — it must
+be present in the process environment (`KeyError` at import otherwise). On
+hosts that execute a WSGI file, plain variable assignments like
+`DATABASE_URL = "..."` do **not** become OS environment variables; write to
+`os.environ` explicitly (see `wsgi.py` in this repo, which is the canonical
+example).
+
 ```bash
 export FLASK_ENV=production
-export SECRET_KEY='a-long-random-string'
+export SECRET_KEY='a-long-random-string'   # REQUIRED: without it the app
+                                           # falls back to a known dev key
+                                           # and session cookies are forgeable
 export DATABASE_URL='postgresql://user:password@localhost:5432/allmyprofiles'
+                                           # special chars in the password must
+                                           # be percent-encoded, e.g. '!' -> %21
 export UPLOAD_FOLDER=/var/data/allmyprofiles/uploads   # persistent disk!
+# Optional — per-profile traffic analytics (users: /analytics, admins: /fmd):
+export FMD_ENABLED=1                     # off by default
+# export FMD_DATABASE_URL=... FMD_LINK=fmd FMD_MONITOR_LEVEL=1
 
 pip install -r requirements.txt
 flask db upgrade                       # apply schema migrations
@@ -160,7 +174,28 @@ python create_admin.py                 # bootstrap your admin account
 gunicorn "app:create_app('production')" -w 4 -b 0.0.0.0:8000
 ```
 
-Heroku-style `postgres://` URLs are normalized to `postgresql://` automatically.
+### PythonAnywhere (WSGI file)
+
+Use the repo's `wsgi.py` as the application object source — from the web tab's
+WSGI configuration file:
+
+```python
+import os, sys
+path = '/home/jbartholme/allmyprofiles'
+if path not in sys.path:
+    sys.path.insert(0, path)
+
+from wsgi import application   # sets os.environ vars, then create_app()
+```
+
+`wsgi.py` sets `FLASK_ENV`, `DATABASE_URL`, `SECRET_KEY` and `FMD_ENABLED` via
+`os.environ.setdefault` before importing the app. Preferably move the real
+credentials into the web tab's **Environment variables** panel (or a git-ignored
+file) and keep only non-secret defaults in `wsgi.py`; if you commit secrets to
+the repo, rotate them. Heroku-style `postgres://` URLs are normalized to
+`postgresql://` automatically. For PythonAnywhere Postgres the URL looks like
+`postgresql+psycopg://user:pass%21@host.pythonanywhere.com:port/dbname` with
+`sslmode=require` appended (`?sslmode=require`) if the connection is rejected.
 
 > **Schema changes:** all earlier migrations were squashed into one baseline,
 > `0001baseline`, which creates every table and seeds the link categories,

@@ -267,8 +267,7 @@ def admin_required(view):
 # ----------------------------------------------------------------------
 
 #: Public profile endpoints whose traffic users get a per-profile view of.
-FMD_PROFILE_ENDPOINTS = ('public_profile',)
-
+FMD_PROFILE_ENDPOINTS = ('public_profile')
 
 def _fmd_enabled():
     """Feature flag: set FMD_ENABLED=1 to turn traffic monitoring on.
