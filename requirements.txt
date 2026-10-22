@@ -30,3 +30,8 @@ cryptography>=41.0,<43   # <43 keeps manylinux/macosx abi3 wheels broad; 42.x in
 
 # Stripe — subscription billing & admin SaaS overview (stripe_billing.py)
 stripe>=12.0
+
+# Traffic monitoring / per-profile analytics (app.py FMD integration).
+# Opt-in at runtime via FMD_ENABLED=1; serves the admin-only unfiltered
+# dashboard at /fmd and backs the user-facing /analytics panel.
+Flask-MonitoringDashboard>=5.1,<6
