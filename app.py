@@ -5949,7 +5949,8 @@ def register_template_context(app):
 # App Initialization
 # ==========================================
 
-app = create_app(os.environ.get('FLASK_ENV', 'development'))
+#app = create_app(os.environ.get('FLASK_ENV', 'development'))
 
 if __name__ == '__main__':
+    
     app.run(debug=True)
